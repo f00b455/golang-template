@@ -79,12 +79,21 @@
                     allHeadlines = data.headlines;
                     updateHeadlinesList(data.headlines);
                     updateTimestamp();
-                    updateFilterInfo();
+                    updateFilterInfo(data.totalCount);
                 } else {
                     console.error('Failed to fetch headlines:', data.error);
+                    showErrorMessage('Unable to fetch headlines. Please try again later.');
                 }
             } catch (error) {
                 console.error('Error refreshing headlines:', error);
+                showErrorMessage('Network error. Please check your connection.');
+            }
+        }
+
+        function showErrorMessage(message) {
+            const container = document.getElementById('headlines-container');
+            if (container) {
+                container.innerHTML = `<div class="error-message"><p>⚠️ ${message}</p></div>`;
             }
         }
 
@@ -141,26 +150,23 @@
             refreshHeadlines();
         }
 
-        function updateFilterInfo() {
+        function updateFilterInfo(totalCount) {
             const filterInfo = document.getElementById('filter-info');
             const filterInput = document.getElementById('filter-input');
 
             if (!filterInfo) return;
 
             if (filterInput && filterInput.value) {
-                // Fetch total count without filter
-                fetch('/api/headlines').then(res => res.json()).then(data => {
-                    const totalCount = data.headlines ? data.headlines.length : 0;
-                    const filteredCount = allHeadlines.length;
+                const filteredCount = allHeadlines.length;
+                const total = totalCount || filteredCount;
 
-                    if (filteredCount === 0) {
-                        filterInfo.textContent = 'No headlines match your filter';
-                        filterInfo.classList.add('no-results');
-                    } else {
-                        filterInfo.textContent = `Showing ${filteredCount} of ${totalCount} matching articles`;
-                        filterInfo.classList.remove('no-results');
-                    }
-                });
+                if (filteredCount === 0) {
+                    filterInfo.textContent = 'No headlines match your filter';
+                    filterInfo.classList.add('no-results');
+                } else {
+                    filterInfo.textContent = `Showing ${filteredCount} of ${total} matching articles`;
+                    filterInfo.classList.remove('no-results');
+                }
             } else {
                 filterInfo.textContent = '';
                 filterInfo.classList.remove('no-results');

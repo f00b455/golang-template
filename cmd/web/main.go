@@ -22,11 +22,23 @@ type PageData struct {
 	Error     string
 }
 
-var templates *template.Template
+type WebConfig struct {
+	APIURL string
+}
+
+var (
+	templates *template.Template
+	webConfig *WebConfig
+)
 
 func main() {
-	// Load config (currently unused, but may be needed for future settings)
-	_ = config.Load()
+	// Load config
+	cfg := config.Load()
+
+	// Initialize web config
+	webConfig = &WebConfig{
+		APIURL: getEnv("API_URL", fmt.Sprintf("http://localhost:%s", cfg.Port)),
+	}
 
 	// Parse templates
 	funcMap := template.FuncMap{
@@ -55,7 +67,7 @@ func main() {
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch headlines from API
-	headlines, err := fetchHeadlines()
+	headlines, err := fetchHeadlines("")
 
 	data := PageData{
 		Title:     "SPIEGEL Headlines",
@@ -74,7 +86,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 
 func headlinesAPIHandler(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("filter")
-	headlines, err := fetchHeadlinesWithFilter(filter)
+	headlines, totalCount, err := fetchHeadlinesWithCount(filter)
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -85,41 +97,16 @@ func headlinesAPIHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"headlines": headlines,
-		"updatedAt": time.Now().Format(time.RFC3339),
-		"filter":    filter,
+		"headlines":  headlines,
+		"updatedAt":  time.Now().Format(time.RFC3339),
+		"filter":     filter,
+		"totalCount": totalCount,
 	})
 }
 
-func fetchHeadlines() ([]shared.RssHeadline, error) {
+func fetchHeadlines(filter string) ([]shared.RssHeadline, error) {
 	// Fetch from the API server
-	apiURL := "http://localhost:3002/api/rss/spiegel/top5"
-
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	resp, err := client.Get(apiURL)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
-	}
-
-	var response handlers.HeadlinesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, err
-	}
-
-	return response.Headlines, nil
-}
-
-func fetchHeadlinesWithFilter(filter string) ([]shared.RssHeadline, error) {
-	// Fetch from the API server
-	apiURL := "http://localhost:3002/api/rss/spiegel/top5"
+	apiURL := fmt.Sprintf("%s/api/rss/spiegel/top5", webConfig.APIURL)
 
 	if filter != "" {
 		apiURL += "?filter=" + url.QueryEscape(filter)
@@ -147,6 +134,26 @@ func fetchHeadlinesWithFilter(filter string) ([]shared.RssHeadline, error) {
 	return response.Headlines, nil
 }
 
+func fetchHeadlinesWithCount(filter string) ([]shared.RssHeadline, int, error) {
+	// First fetch all headlines to get total count
+	allHeadlines, err := fetchHeadlines("")
+	if err != nil {
+		return nil, 0, err
+	}
+	totalCount := len(allHeadlines)
+
+	// Then fetch with filter if provided
+	if filter != "" {
+		filteredHeadlines, err := fetchHeadlines(filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		return filteredHeadlines, totalCount, nil
+	}
+
+	return allHeadlines, totalCount, nil
+}
+
 func formatDate(dateStr string) string {
 	// Parse the date
 	t, err := time.Parse(time.RFC3339, dateStr)
@@ -161,4 +168,11 @@ func formatDate(dateStr string) string {
 	}
 
 	return t.In(loc).Format("02.01.2006 15:04")
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

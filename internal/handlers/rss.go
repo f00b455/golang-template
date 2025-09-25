@@ -47,7 +47,8 @@ type ErrorResponse struct {
 
 // HeadlinesResponse represents the response for multiple headlines.
 type HeadlinesResponse struct {
-	Headlines []shared.RssHeadline `json:"headlines"`
+	Headlines  []shared.RssHeadline `json:"headlines"`
+	TotalCount int                  `json:"totalCount,omitempty"`
 }
 
 // NewRSSHandler creates a new RSSHandler.
@@ -139,6 +140,7 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		headlines := h.multiCache.data
 		h.mu.RUnlock()
 
+		totalCount := len(headlines)
 		// Apply filter if provided
 		if filterKeyword != "" {
 			headlines = h.filterHeadlines(headlines, filterKeyword)
@@ -147,7 +149,10 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		if len(headlines) > limit {
 			headlines = headlines[:limit]
 		}
-		c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
+		c.JSON(http.StatusOK, HeadlinesResponse{
+			Headlines:  headlines,
+			TotalCount: totalCount,
+		})
 		return
 	}
 	h.mu.RUnlock()
@@ -167,6 +172,7 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 	}
 	h.mu.Unlock()
 
+	totalCount := len(headlines)
 	// Apply filter if provided
 	if filterKeyword != "" {
 		headlines = h.filterHeadlines(headlines, filterKeyword)
@@ -176,7 +182,10 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		headlines = headlines[:limit]
 	}
 
-	c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
+	c.JSON(http.StatusOK, HeadlinesResponse{
+		Headlines:  headlines,
+		TotalCount: totalCount,
+	})
 }
 
 func (h *RSSHandler) fetchLatestHeadline() (*shared.RssHeadline, error) {
