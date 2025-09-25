@@ -107,6 +107,12 @@ const docTemplate = `{
                         "description": "Number of headlines to fetch (1-5)",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter headlines by keyword",
+                        "name": "filter",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -114,6 +120,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.HeadlinesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "503": {
@@ -153,6 +165,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/shared.RssHeadline"
                     }
+                },
+                "totalCount": {
+                    "type": "integer"
                 }
             }
         },
