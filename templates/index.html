@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Go Web App</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📰 {{.Title}}</h1>
+            <div class="update-info">
+                <span>Aktualisiert: {{.UpdatedAt}}</span>
+                <button id="refresh-btn" onclick="refreshHeadlines()">🔄 Aktualisieren</button>
+            </div>
+        </header>
+
+        <main>
+            {{if .Error}}
+            <div class="error-message">
+                <p>⚠️ {{.Error}}</p>
+            </div>
+            {{else}}
+            <div id="headlines-container" class="headlines-list">
+                {{range .Headlines}}
+                <article class="headline-item">
+                    <div class="headline-content">
+                        <h3>
+                            <a href="{{.Link}}" target="_blank" rel="noopener noreferrer">
+                                {{.Title}}
+                            </a>
+                        </h3>
+                        <div class="headline-meta">
+                            <span class="date">📅 {{formatDate .PublishedAt}}</span>
+                            <span class="source">📍 {{.Source}}</span>
+                        </div>
+                    </div>
+                </article>
+                {{end}}
+            </div>
+            {{end}}
+        </main>
+
+        <footer>
+            <p>Powered by Go Template 🚀</p>
+        </footer>
+    </div>
+
+    <script>
+        // Auto-refresh every 5 minutes
+        setInterval(refreshHeadlines, 5 * 60 * 1000);
+
+        async function refreshHeadlines() {
+            try {
+                const response = await fetch('/api/headlines');
+                const data = await response.json();
+
+                if (response.ok && data.headlines) {
+                    updateHeadlinesList(data.headlines);
+                    updateTimestamp();
+                } else {
+                    console.error('Failed to fetch headlines:', data.error);
+                }
+            } catch (error) {
+                console.error('Error refreshing headlines:', error);
+            }
+        }
+
+        function updateHeadlinesList(headlines) {
+            const container = document.getElementById('headlines-container');
+            if (!container) return;
+
+            container.innerHTML = headlines.map(headline => `
+                <article class="headline-item">
+                    <div class="headline-content">
+                        <h3>
+                            <a href="${headline.link}" target="_blank" rel="noopener noreferrer">
+                                ${headline.title}
+                            </a>
+                        </h3>
+                        <div class="headline-meta">
+                            <span class="date">📅 ${formatDateJS(headline.publishedAt)}</span>
+                            <span class="source">📍 ${headline.source}</span>
+                        </div>
+                    </div>
+                </article>
+            `).join('');
+        }
+
+        function updateTimestamp() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+            document.querySelector('.update-info span').textContent = `Aktualisiert: ${timeStr}`;
+        }
+
+        function formatDateJS(dateStr) {
+            const date = new Date(dateStr);
+            const options = {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: 'Europe/Berlin'
+            };
+            return date.toLocaleDateString('de-DE', options);
+        }
+    </script>
+</body>
+</html>

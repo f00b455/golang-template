@@ -1,9 +1,0 @@
-{
-  "files": [],
-  "references": [
-    { "path": "./packages/shared" },
-    { "path": "./packages/lib-foo" },
-    { "path": "./apps/api" },
-    { "path": "./apps/web" }
-  ]
-}

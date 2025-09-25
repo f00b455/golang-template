@@ -2,9 +2,9 @@ echo "🚀 Running pre-push validation..."
 echo "📍 This ensures your changes won't break CI/CD"
 echo ""
 
-# Run the full pipeline validation (lint + type-check + build + test + cucumber)
+# Run the full pipeline validation (lint + test + test-bdd + build)
 echo "🔍 Running full pipeline validation..."
-pnpm validate || {
+make validate || {
   echo ""
   echo "❌ Pipeline validation failed!"
   echo "💡 Your push was blocked to prevent CI failures"
@@ -15,12 +15,9 @@ pnpm validate || {
   echo "  3. Push again: git push"
   echo ""
   echo "For quick development iterations, you can also run:"
-  echo "  pnpm validate:quick  # Just lint + tests (faster)"
+  echo "  make validate-quick  # Just lint + tests (faster)"
   echo ""
   exit 1
 }
 
-echo ""
-echo "✅ All pipeline checks passed!"
-echo "🎉 Safe to push to remote repository"
 echo ""

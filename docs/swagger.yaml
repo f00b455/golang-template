@@ -1,0 +1,114 @@
+basePath: /api
+definitions:
+  handlers.ErrorResponse:
+    properties:
+      error:
+        example: Unable to fetch RSS feed
+        type: string
+    type: object
+  handlers.GreetResponse:
+    properties:
+      message:
+        example: Hello, World!
+        type: string
+    type: object
+  handlers.HeadlinesResponse:
+    properties:
+      headlines:
+        items:
+          $ref: '#/definitions/shared.RssHeadline'
+        type: array
+    type: object
+  shared.RssHeadline:
+    properties:
+      link:
+        type: string
+      publishedAt:
+        type: string
+      source:
+        type: string
+      title:
+        type: string
+    type: object
+host: localhost:3002
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: API for Golang template project
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Golang Template API
+  version: "1.0"
+paths:
+  /greet:
+    get:
+      consumes:
+      - application/json
+      description: Returns a greeting message
+      parameters:
+      - default: World
+        description: Name to greet
+        in: query
+        name: name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.GreetResponse'
+      summary: Greet endpoint
+      tags:
+      - greet
+  /rss/spiegel/latest:
+    get:
+      consumes:
+      - application/json
+      description: Fetches the most recent headline from SPIEGEL RSS feed
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/shared.RssHeadline'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get latest SPIEGEL RSS headline
+      tags:
+      - rss
+  /rss/spiegel/top5:
+    get:
+      consumes:
+      - application/json
+      description: Fetches the top N headlines from SPIEGEL RSS feed (max 5)
+      parameters:
+      - default: 5
+        description: Number of headlines to fetch (1-5)
+        in: query
+        maximum: 5
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HeadlinesResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get top N SPIEGEL RSS headlines
+      tags:
+      - rss
+swagger: "2.0"

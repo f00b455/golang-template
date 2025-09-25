@@ -6,72 +6,63 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Code Quality Standards:
 
-- **Single Responsibility**: Each function/class should have one reason to change
+- **Single Responsibility**: Each function/struct should have one reason to change
 - **Pure Functions**: Prefer functions without side effects when possible
-- **Explicit Types**: Use TypeScript's type system fully - avoid `any`
+- **Explicit Types**: Use Go's type system fully - avoid `interface{}` where possible
 - **Descriptive Naming**: Use clear, searchable names for variables and functions
-- **Small Functions**: Keep functions focused and under 20 lines when possible (enforced by ESLint)
+- **Small Functions**: Keep functions focused and under 20 lines when possible (enforced by golangci-lint)
 - **No Comments for What**: Code should be self-documenting; comments explain why, not what
 
-### ESLint Clean Code Enforcement:
+### Golangci-lint Clean Code Enforcement:
 
-The codebase uses ESLint rules to automatically enforce Clean Code principles:
+The codebase uses golangci-lint rules to automatically enforce Clean Code principles:
 
-**Function Length Limits:**
-- **Regular code**: 20 lines max per function (enforces Single Responsibility)
-- **Test files**: 50 lines max (tests need more setup/assertions)
+**Function Complexity Limits:**
+- **Cyclomatic complexity**: 10 max (number of code paths)
+- **Cognitive complexity**: 10 max (mental effort to understand)
+- **Function length**: 60 lines max (enforces Single Responsibility)
 - **Rationale**: Smaller functions are easier to test, understand, and maintain
 
-**File Length Limits:**
-- **Regular files**: 300 lines max (promotes modular design)
-- **Test files**: 500 lines max (test suites can be larger)
-- **Rationale**: Prevents monolithic files that are hard to navigate
+**File and Package Organization:**
+- **File length**: 500 lines max (promotes modular design)
+- **Package cohesion**: Related functionality in same package
+- **Import organization**: Standard library, third-party, local imports
+- **Rationale**: Well-organized code is easier to navigate and maintain
 
-**Complexity Limits:**
-- **Cyclomatic complexity**: 10 max (number of code paths)
-- **Nesting depth**: 3 levels max (encourages early returns)
-- **Parameters**: 4 max per function (use objects for complex data)
-- **Statements**: 15 max per function (complements line limit)
+**Code Quality Rules:**
+- **Error handling**: All errors must be handled or explicitly ignored
+- **Naming conventions**: Go standard naming (camelCase, PascalCase)
+- **No magic numbers**: Use named constants for numeric literals
+- **Interface segregation**: Small, focused interfaces
 
-**Phase-Based Migration:**
-Set `ESLINT_CLEAN_CODE_PHASE` environment variable:
-- **Phase 1** (default): `warn` - Assessment phase to identify violations
-- **Phase 2**: `warn` - Progressive refactoring with CI stability
-- **Phase 3**: `error` - Full enforcement, violations break the build
-
-To assess current violations:
+To run linting:
 ```bash
-# Run with default Phase 1 (warnings)
-pnpm lint
-
-# Generate detailed report
-pnpm lint:report
-
-# Run with Phase 3 enforcement
-ESLINT_CLEAN_CODE_PHASE=3 pnpm lint
+make lint                    # Run all linters
+./bin/golangci-lint run     # Run linter directly
+make lint-fix               # Auto-fix linting issues where possible
 ```
 
 ### Pure Function Principles:
 
 - **Deterministic**: Same input always produces same output
-- **No Side Effects**: Don't modify external state, DOM, or global variables
+- **No Side Effects**: Don't modify external state or global variables
 - **No External Dependencies**: Don't rely on external mutable state
-- **Immutable Parameters**: Don't mutate input parameters
+- **Immutable Parameters**: Don't mutate input parameters (use pointers carefully)
 - **Referential Transparency**: Function calls can be replaced with their return values
 - **Predictable**: Easy to test, debug, and reason about
 - **Examples of Pure Functions**:
 
-  ```typescript
+  ```go
   // ✅ Pure - deterministic, no side effects
-  const add = (a: number, b: number): number => a + b;
-  const formatUser = (user: User): string => `${user.name} (${user.email})`;
+  func Add(a, b int) int { return a + b }
+  func FormatUser(user User) string { return fmt.Sprintf("%s (%s)", user.Name, user.Email) }
 
   // ❌ Impure - side effects, external dependencies
-  const logAndAdd = (a: number, b: number): number => {
-    console.log('Adding numbers'); // Side effect
-    return a + b;
-  };
-  const getCurrentUser = (): User => database.users.current; // External dependency
+  func LogAndAdd(a, b int) int {
+    log.Println("Adding numbers") // Side effect
+    return a + b
+  }
+  func GetCurrentUser() User { return database.CurrentUser } // External dependency
   ```
 
 - **When to Use Pure Functions**: Data transformations, calculations, formatting, validation
@@ -84,7 +75,8 @@ ESLINT_CLEAN_CODE_PHASE=3 pnpm lint
 - **Test Database**: Always use test database, never production data
 - **Arrange-Act-Assert**: Structure tests clearly with setup, execution, and verification
 - **Descriptive Test Names**: Test names should describe the behavior being tested
-- **BDD for Libraries**: Every library must have feature files describing user stories and business requirements
+- **Table-driven tests**: Use Go's table-driven test pattern for multiple test cases
+- **BDD for Packages**: Every package must have feature files describing user stories and business requirements
 
 ### Architecture Guidelines:
 
@@ -93,127 +85,129 @@ ESLINT_CLEAN_CODE_PHASE=3 pnpm lint
 - **Immutability**: Prefer immutable data structures and operations
 - **Separation of Concerns**: Keep business logic separate from framework code
 - **API Design**: RESTful endpoints with proper HTTP status codes
-- **Type Safety**: Leverage TypeScript's strict mode for compile-time safety
+- **Type Safety**: Leverage Go's compile-time type checking
 
 ### Performance Considerations:
 
-- **Bundle Size**: Keep frontend bundle size minimal
+- **Memory Allocation**: Minimize heap allocations in hot paths
+- **Goroutine Management**: Use worker pools for concurrent processing
 - **Database Queries**: Use efficient queries and avoid N+1 problems
 - **Caching**: Implement appropriate caching strategies
-- **Lazy Loading**: Load resources only when needed
+- **Profiling**: Use Go's built-in profiling tools (pprof)
 
 ## Project Structure
 
-This is a TypeScript monorepo using pnpm workspaces and Turborepo for developing core functionalities, MCP servers, CLI apps, and libraries:
+This is a pure Go project with a clean architecture for developing APIs, CLI applications, and reusable packages:
 
 ```
-ts-pure-template/
-├── apps/
-│   ├── web/          # Next.js frontend application
-│   ├── api/          # Fastify backend API
-│   └── cli/          # CLI applications
-├── packages/
-│   ├── shared/       # Shared TypeScript utilities and types
-│   ├── core/         # Core business logic and functionalities
-│   ├── mcp-*/        # MCP (Model Context Protocol) servers
-│   └── lib-*/        # Reusable libraries
-├── tools/            # Build tools and development utilities
-├── .changeset/       # Changesets configuration for versioning
-├── .claude/          # Claude Code-Playbooks
-└── .github/          # CI/CD workflows
+golang-template/
+├── cmd/                  # Application entry points
+│   ├── api/              # REST API server
+│   └── cli/              # CLI application
+├── internal/             # Private application code
+│   ├── config/           # Configuration management
+│   ├── handlers/         # HTTP request handlers
+│   └── middleware/       # HTTP middleware
+├── pkg/                  # Public reusable packages
+│   ├── core/             # Core business logic
+│   └── shared/           # Shared utilities and types
+├── features/             # BDD feature files and tests
+├── scripts/              # Build and deployment scripts
+├── docs/                 # Documentation
+├── bin/                  # Compiled binaries
+├── .github/              # CI/CD workflows
+└── .husky/               # Git hooks
 ```
 
 ## Development Commands
 
-### Root Commands (run these from project root):
+### Primary Commands (run these from project root):
 
-- `pnpm dev` - Start all applications in development mode
-- `pnpm build` - Build all packages and applications
-- `pnpm test` - Run unit tests across all packages
-- `pnpm test:e2e` - Run Playwright E2E tests
-- `pnpm test:cucumber` - Run Cucumber BDD tests
-- `pnpm lint` - Lint all packages
-- `pnpm type-check` - TypeScript type checking
-- `pnpm format` - Format code with Prettier
-- `pnpm changeset` - Create a changeset for versioning
+- `make dev` - Start API server in development mode
+- `make build` - Build all binaries (API server and CLI tool)
+- `make test` - Run unit tests across all packages
+- `make test-bdd` - Run BDD/Cucumber tests
+- `make lint` - Run golangci-lint across all packages
+- `make format` - Format code with gofmt and goimports
+- `make clean` - Clean build artifacts and binaries
 
 ### Development Workflow:
 
 **AUTOMATED PRE-PUSH VALIDATION**: This repo uses Husky to automatically validate code before each push.
-The pre-push hook runs: `pnpm validate` (lint + type-check + build + test:run + test:cucumber)
+The pre-push hook runs: `make validate` (lint + test + test-bdd + build)
 
 **Development Commands**:
-- `pnpm validate:quick` - Quick validation (lint + type-check + tests) - **Use during development**
-- `pnpm validate` - Full pipeline validation (lint + type-check + build + tests + cucumber) - **Runs automatically on push**
+- `make validate-quick` - Quick validation (lint + test) - **Use during development**
+- `make validate` - Full pipeline validation (lint + test + test-bdd + build) - **Runs automatically on push**
 
 **Efficient Dev Cycle**:
 1. Code freely and commit often (no pre-commit validation)
-2. Run `pnpm validate:quick` during development for fast feedback
+2. Run `make validate-quick` during development for fast feedback
 3. When ready to push: `git push` - automatic validation prevents broken CI/CD
 4. If validation fails, fix issues and push again
 
 ### Package-Specific Commands:
 
-- `pnpm --filter @ts-template/web dev` - Run Next.js in dev mode
-- `pnpm --filter @ts-template/api dev` - Run Fastify API in dev mode
-- `pnpm --filter @ts-template/shared test` - Test shared package only
+- `go run ./cmd/api` - Run API server directly
+- `go run ./cmd/cli --help` - Run CLI tool with help
+- `go test ./pkg/core/...` - Test core package only
+- `go test -race ./...` - Run all tests with race detection
 
 ## Architecture
 
-### Monorepo Setup:
+### Project Organization:
 
-- **pnpm**: Package manager with workspace support
-- **Turborepo**: Build system and task runner for monorepos
-- **Changesets**: Versioning and changelog management
+- **cmd/**: Application entry points following Go project layout standards
+- **internal/**: Private application code, not importable by other projects
+- **pkg/**: Public packages that can be imported by other projects
+- **Makefile**: Centralized build, test, and validation commands
 
-### Frontend (apps/web):
+### API Server (cmd/api):
 
-- **Next.js 14**: React framework with App Router
-- **Vitest**: Unit testing framework
-- **Playwright**: End-to-end testing
-- Uses shared package via workspace protocol
-
-### Backend (apps/api):
-
-- **Fastify**: Fast Node.js web framework
+- **Gin**: Fast HTTP router and middleware framework
 - **Swagger**: API documentation (available at /documentation)
-- **Vitest**: Unit testing
-- **Cucumber**: BDD testing with Gherkin syntax
-- CORS configured for Next.js frontend
+- **Graceful shutdown**: Proper cleanup on termination signals
+- **CORS**: Configured for frontend integration
+- **Structured logging**: JSON logging with levels
 
-### Shared Package (packages/shared):
+### CLI Tool (cmd/cli):
 
-- Common TypeScript utilities and types
-- Consumed by both web and API applications
-- Includes comprehensive unit tests
+- **Cobra**: Command-line interface framework
+- **Progress bars**: Visual feedback for long operations
+- **Colorized output**: Enhanced user experience
+- **Configuration**: Support for config files and environment variables
+
+### Core Packages:
+
+- **pkg/core/**: Business logic and domain models
+- **pkg/shared/**: Common utilities and helper functions
+- **internal/**: Application-specific implementations
 
 ### Testing Strategy:
 
-- **Unit Tests**: Vitest with mocks for external dependencies
-- **E2E Tests**: Playwright for full application flows
-- **BDD Tests**: Cucumber with Gherkin syntax for business requirements
-- **Library BDD Requirement**: Every library package MUST have feature files
-- **Feature File Coverage**: Each user story/issue requires at least one .feature file
+- **Unit Tests**: Standard Go testing with testify for assertions
+- **BDD Tests**: Godog (Cucumber for Go) with Gherkin syntax
+- **Test doubles**: Mocks for external dependencies
+- **Table-driven tests**: Go idiom for testing multiple scenarios
 - **Always use test database** (important requirement)
 
 ### CI/CD:
 
-- GitHub Actions with separate jobs for linting, testing, building
-- Automated versioning with Changesets (private packages)
-- Coverage reporting with Codecov
-- Release PRs for version management (no npm publishing)
+- **GitHub Actions**: Separate jobs for linting, testing, building
+- **Automated validation**: Pre-push hooks prevent broken builds
+- **Build artifacts**: Compiled binaries for multiple platforms
+- **Code coverage**: Coverage reports and thresholds
 
-## BDD Requirements for Libraries
+## BDD Requirements for Packages
 
 ### Mandatory Feature Files:
 
-Every library package (packages/lib-_, packages/shared) AND application package (apps/_) MUST include:
+Every package in `pkg/` MUST include:
 
 - `.feature` files in the `features/` directory
 - Gherkin scenarios describing user stories and business requirements
-- Step definitions in `features/step_definitions/`
-- Cucumber configuration (`cucumber.js`)
-- `test:cucumber` script in package.json
+- Step definitions in Go test files
+- Integration with `make test-bdd` command
 - **GitHub Issue references** (see below)
 
 ### Feature File Structure with Issue References:
@@ -239,7 +233,7 @@ Feature: [Feature Name]
 
 ### Issue Reference Requirements:
 
-**EVERY feature file in the monorepo MUST contain:**
+**EVERY feature file in the project MUST contain:**
 
 1. **Header Comments** (first 2 lines):
    - `# Issue: #<number>` - GitHub issue number reference
@@ -247,32 +241,27 @@ Feature: [Feature Name]
 
 2. **Tags** (on the Feature line):
    - `@issue-<number>` - Issue tag for filtering and tracking
-   - `@pkg(<package-name>)` - Package identifier tag (e.g., @pkg(lib-foo), @pkg(api), @pkg(web))
+   - `@pkg(<package-name>)` - Package identifier tag (e.g., @pkg(core), @pkg(shared))
 
 3. **CI Verification**:
    - The CI pipeline automatically verifies all feature files have proper issue references
    - Missing references will cause the CI to fail with specific error messages
    - This ensures full traceability between user stories/issues and BDD tests
 
-4. **Example for Issue #7**:
+4. **Step Definitions Implementation**:
+   - When creating new feature files, step definitions MUST be implemented in Go
+   - Use Godog framework for step definitions:
 
-   ```gherkin
-   # Issue: #7
-   # URL: https://github.com/f00b455/ts-pure-template/issues/7
-   @pkg(lib-foo) @issue-7
-   Feature: lib-foo – Processing Functions
-   ```
-
-5. **Step Definitions with Dummy Implementations**:
-   - When creating new feature files, step definitions MUST be implemented
-   - Unimplemented steps should throw an exception with a clear message:
-
-   ```typescript
-   function unimplemented(step: string): never {
-     throw new Error(`UNIMPLEMENTED_STEP: ${step} — please implement.`);
+   ```go
+   func (ctx *FeatureContext) iHaveTheInput(input string) error {
+       ctx.input = input
+       return nil
    }
 
-   Given('<condition>', () => unimplemented('Given <condition>'));
+   func InitializeScenario(ctx *godog.ScenarioContext) {
+       featureCtx := &FeatureContext{}
+       ctx.Step(`^I have the input "([^"]*)"$`, featureCtx.iHaveTheInput)
+   }
    ```
 
 ### Coverage Requirements:
@@ -281,55 +270,34 @@ Feature: [Feature Name]
 - Cover all public API functions
 - Test pure function properties (determinism, immutability)
 - Include error handling scenarios
-- Verify integration points between libraries
+- Verify integration points between packages
 
-### Example Library BDD Structure:
+### Example Package BDD Structure:
 
 ```
-packages/lib-foo/
+pkg/core/
 ├── features/
 │   ├── foo-processing.feature      # Core processing functionality
 │   ├── foo-greeting.feature        # Integration features
-│   ├── foo-data-operations.feature # Data transformation features
-│   └── step_definitions/
-│       └── foo.steps.ts            # Package-specific step implementations
-├── cucumber.cjs                    # Cucumber configuration
-└── package.json                    # Includes test:cucumber script
+│   └── foo-data-operations.feature # Data transformation features
+├── foo_test.go                     # Unit tests
+├── foo_bdd_test.go                 # BDD step definitions
+└── foo.go                          # Implementation
 ```
-
-### Shared Cucumber Steps:
-
-To avoid duplication, common step definitions are centralized in `packages/cucumber-shared/`:
-
-```
-packages/cucumber-shared/
-├── src/
-│   ├── index.ts                    # Re-exports all steps and types
-│   └── steps/
-│       ├── common.steps.ts         # Generic Given/When/Then steps
-│       ├── assertions.steps.ts     # Common assertion patterns
-│       ├── data-operations.steps.ts # Array and data manipulation steps
-│       └── api.steps.ts            # API testing common steps
-├── package.json
-└── tsup.config.ts                  # Build configuration
-```
-
-**Using Shared Steps:**
-- All cucumber configurations automatically include shared steps
-- Package-specific steps extend or override shared functionality
-- Shared steps use a common World context interface
-- Packages can extend the World interface for local state
 
 ### Running BDD Tests:
 
-- Individual package: `pnpm --filter @ts-template/lib-foo test:cucumber`
-- All packages: `pnpm test:cucumber` (from root)
-- CI pipeline includes Cucumber test execution
+- All packages: `make test-bdd` (from root)
+- Specific package: `go test -v ./pkg/core/`
+- With coverage: `make test-cover`
+- CI pipeline includes BDD test execution
 
 ## Important Notes:
 
 - Always use test database for integration tests
 - Use mocks in tests as specified in user requirements
-- TypeScript strict mode enabled across all packages
-- Shared tsconfig.base.json for consistent configuration
-- **BDD is mandatory for all library packages**
+- Go modules enabled with semantic versioning
+- Follow Go project layout standards
+- **BDD is mandatory for all public packages**
+- Use `gofmt` and `goimports` for consistent formatting
+- Handle all errors explicitly - no silent failures
