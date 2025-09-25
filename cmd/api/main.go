@@ -52,10 +52,16 @@ func main() {
 		api.GET("/rss/spiegel/top5", rssHandler.GetTop5)
 	}
 
+	// Static files for terminal frontend
+	router.Static("/static", "./static")
+	router.StaticFile("/", "./static/terminal.html")
+	router.StaticFile("/terminal", "./static/terminal.html")
+
 	// Swagger documentation
 	router.GET("/documentation/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	log.Printf("Server starting on port %s", cfg.Port)
+	log.Printf("Terminal frontend available at http://localhost:%s/", cfg.Port)
 	log.Printf("Swagger documentation available at http://localhost:%s/documentation/index.html", cfg.Port)
 
 	if err := router.Run(":" + cfg.Port); err != nil {
