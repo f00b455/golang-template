@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -72,7 +73,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func headlinesAPIHandler(w http.ResponseWriter, r *http.Request) {
-	headlines, err := fetchHeadlines()
+	filter := r.URL.Query().Get("filter")
+	headlines, err := fetchHeadlinesWithFilter(filter)
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -85,12 +87,43 @@ func headlinesAPIHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"headlines": headlines,
 		"updatedAt": time.Now().Format(time.RFC3339),
+		"filter":    filter,
 	})
 }
 
 func fetchHeadlines() ([]shared.RssHeadline, error) {
 	// Fetch from the API server
 	apiURL := "http://localhost:3002/api/rss/spiegel/top5"
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var response handlers.HeadlinesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+
+	return response.Headlines, nil
+}
+
+func fetchHeadlinesWithFilter(filter string) ([]shared.RssHeadline, error) {
+	// Fetch from the API server
+	apiURL := "http://localhost:3002/api/rss/spiegel/top5"
+
+	if filter != "" {
+		apiURL += "?filter=" + url.QueryEscape(filter)
+	}
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,

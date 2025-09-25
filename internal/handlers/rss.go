@@ -120,7 +120,8 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 // @Tags         rss
 // @Accept       json
 // @Produce      json
-// @Param        limit    query     int  false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        limit    query     int     false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        filter   query     string  false  "Filter headlines by keyword"
 // @Success      200      {object}  HeadlinesResponse
 // @Failure      503      {object}  ErrorResponse
 // @Router       /rss/spiegel/top5 [get]
@@ -131,13 +132,21 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		limit = 5
 	}
 
+	filterKeyword := c.Query("filter")
+
 	h.mu.RLock()
 	if len(h.multiCache.data) > 0 && time.Since(h.multiCache.timestamp) < cacheTTL {
 		headlines := h.multiCache.data
+		h.mu.RUnlock()
+
+		// Apply filter if provided
+		if filterKeyword != "" {
+			headlines = h.filterHeadlines(headlines, filterKeyword)
+		}
+
 		if len(headlines) > limit {
 			headlines = headlines[:limit]
 		}
-		h.mu.RUnlock()
 		c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
 		return
 	}
@@ -157,6 +166,11 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		timestamp: time.Now(),
 	}
 	h.mu.Unlock()
+
+	// Apply filter if provided
+	if filterKeyword != "" {
+		headlines = h.filterHeadlines(headlines, filterKeyword)
+	}
 
 	if len(headlines) > limit {
 		headlines = headlines[:limit]
@@ -277,6 +291,24 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 	text = strings.ReplaceAll(text, "<![CDATA[", "")
 	text = strings.ReplaceAll(text, "]]>", "")
 	return strings.TrimSpace(text)
+}
+
+// filterHeadlines filters headlines based on a keyword (case-insensitive).
+func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword string) []shared.RssHeadline {
+	if keyword == "" {
+		return headlines
+	}
+
+	keyword = strings.ToLower(keyword)
+	var filtered []shared.RssHeadline
+
+	for _, headline := range headlines {
+		if strings.Contains(strings.ToLower(headline.Title), keyword) {
+			filtered = append(filtered, headline)
+		}
+	}
+
+	return filtered
 }
 
 // ResetCache resets both caches (for testing purposes).

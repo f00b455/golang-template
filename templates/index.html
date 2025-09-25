@@ -17,6 +17,18 @@
         </header>
 
         <main>
+            <div class="filter-section">
+                <div class="filter-controls">
+                    <input type="text"
+                           id="filter-input"
+                           class="filter-input"
+                           placeholder="Filter headlines... (e.g., Politik, Wirtschaft)"
+                           onkeyup="filterHeadlines()">
+                    <button id="clear-filter" class="clear-filter" onclick="clearFilter()">✕</button>
+                </div>
+                <div id="filter-info" class="filter-info"></div>
+            </div>
+
             {{if .Error}}
             <div class="error-message">
                 <p>⚠️ {{.Error}}</p>
@@ -48,17 +60,26 @@
     </div>
 
     <script>
+        let allHeadlines = [];
+        let currentFilter = '';
+
         // Auto-refresh every 5 minutes
         setInterval(refreshHeadlines, 5 * 60 * 1000);
 
         async function refreshHeadlines() {
+            const filterInput = document.getElementById('filter-input');
+            const filter = filterInput ? filterInput.value : '';
+
             try {
-                const response = await fetch('/api/headlines');
+                const url = filter ? `/api/headlines?filter=${encodeURIComponent(filter)}` : '/api/headlines';
+                const response = await fetch(url);
                 const data = await response.json();
 
                 if (response.ok && data.headlines) {
+                    allHeadlines = data.headlines;
                     updateHeadlinesList(data.headlines);
                     updateTimestamp();
+                    updateFilterInfo();
                 } else {
                     console.error('Failed to fetch headlines:', data.error);
                 }
@@ -106,6 +127,53 @@
             };
             return date.toLocaleDateString('de-DE', options);
         }
+
+        function filterHeadlines() {
+            const filterInput = document.getElementById('filter-input');
+            currentFilter = filterInput.value.toLowerCase();
+            refreshHeadlines();
+        }
+
+        function clearFilter() {
+            const filterInput = document.getElementById('filter-input');
+            filterInput.value = '';
+            currentFilter = '';
+            refreshHeadlines();
+        }
+
+        function updateFilterInfo() {
+            const filterInfo = document.getElementById('filter-info');
+            const filterInput = document.getElementById('filter-input');
+
+            if (!filterInfo) return;
+
+            if (filterInput && filterInput.value) {
+                // Fetch total count without filter
+                fetch('/api/headlines').then(res => res.json()).then(data => {
+                    const totalCount = data.headlines ? data.headlines.length : 0;
+                    const filteredCount = allHeadlines.length;
+
+                    if (filteredCount === 0) {
+                        filterInfo.textContent = 'No headlines match your filter';
+                        filterInfo.classList.add('no-results');
+                    } else {
+                        filterInfo.textContent = `Showing ${filteredCount} of ${totalCount} matching articles`;
+                        filterInfo.classList.remove('no-results');
+                    }
+                });
+            } else {
+                filterInfo.textContent = '';
+                filterInfo.classList.remove('no-results');
+            }
+        }
+
+        // Initialize filter on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const filterInput = document.getElementById('filter-input');
+            if (filterInput) {
+                filterInput.focus();
+            }
+        });
     </script>
 </body>
 </html>
