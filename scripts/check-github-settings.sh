@@ -131,12 +131,12 @@ if [[ "$PROTECTION" == *"Branch not protected"* ]] || [[ "$PROTECTION" == "{}" ]
         echo "   - Protecting branch from deletion"
 
         # Set up branch protection: require PR, no direct pushes
-        # Create JSON payload for branch protection
+        # Create JSON payload for branch protection with required status checks
         cat > /tmp/branch-protection.json << EOF
 {
   "required_status_checks": {
-    "strict": false,
-    "contexts": []
+    "strict": true,
+    "contexts": ["Lint", "Test", "Build"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -182,6 +182,40 @@ else
         PROTECTION_NEEDS_FIX=true
     fi
 
+    # Check required status checks
+    STATUS_CHECKS=$(echo "$PROTECTION" | jq -r '.required_status_checks // null')
+    if [[ "$STATUS_CHECKS" != "null" ]]; then
+        STRICT=$(echo "$STATUS_CHECKS" | jq -r '.strict // false')
+        CONTEXTS=$(echo "$STATUS_CHECKS" | jq -r '.contexts[]? // empty' | tr '\n' ' ')
+
+        if [[ "$STRICT" == "true" ]]; then
+            echo "   ✅ Strict status checks enabled"
+        else
+            echo "   ❌ Strict status checks disabled (should be enabled)"
+            PROTECTION_NEEDS_FIX=true
+        fi
+
+        REQUIRED_CONTEXTS=("Lint" "Test" "Build")
+        MISSING_CONTEXTS=()
+
+        for context in "${REQUIRED_CONTEXTS[@]}"; do
+            if [[ "$CONTEXTS" == *"$context"* ]]; then
+                echo "   ✅ Required status check: $context"
+            else
+                echo "   ❌ Missing required status check: $context"
+                MISSING_CONTEXTS+=("$context")
+                PROTECTION_NEEDS_FIX=true
+            fi
+        done
+
+        if [[ ${#MISSING_CONTEXTS[@]} -eq 0 ]]; then
+            echo "   ✅ All required status checks configured"
+        fi
+    else
+        echo "   ❌ No status checks configured (Lint, Test, Build required)"
+        PROTECTION_NEEDS_FIX=true
+    fi
+
     # Fix existing branch protection if needed
     if [[ "$PROTECTION_NEEDS_FIX" == "true" ]] && [[ "$FIX_MODE" == "true" ]]; then
         echo -e "\n🔧 Updating branch protection settings..."
@@ -192,10 +226,13 @@ else
         CURRENT_RESTRICTIONS=$(echo "$PROTECTION" | jq '.restrictions // null')
         CURRENT_ENFORCE_ADMINS=$(echo "$PROTECTION" | jq -r '.enforce_admins.enabled // false')
 
-        # Create JSON payload for updating branch protection
+        # Create JSON payload for updating branch protection with required status checks
         cat > /tmp/branch-protection-update.json << EOF
 {
-  "required_status_checks": $CURRENT_STATUS_CHECKS,
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["Lint", "Test", "Build"]
+  },
   "enforce_admins": $CURRENT_ENFORCE_ADMINS,
   "required_pull_request_reviews": $CURRENT_PR_REVIEWS,
   "restrictions": $CURRENT_RESTRICTIONS,
@@ -330,12 +367,13 @@ else
     echo "❌ Claude interactive workflow not found"
 fi
 
-# Check if Claude iterative review workflow exists
-if [[ -f ".github/workflows/claude-iterative-review.yml" ]]; then
-    echo "✅ Claude Iterative Review workflow exists"
+# Check if Claude iterative fix workflow exists
+if [[ -f ".github/workflows/claude-iterative-fix.yml" ]]; then
+    echo "✅ Claude Iterative Fix workflow exists"
+    echo "   Auto-fixes failing status checks until they pass (max 3 iterations)"
 else
-    echo "❌ Claude Iterative Review workflow not found"
-    echo "   This workflow automatically fixes code review suggestions with max 3 iterations"
+    echo "❌ Claude Iterative Fix workflow not found"
+    echo "   This workflow automatically fixes failing checks with max 3 iterations"
 fi
 
 # Check if CLAUDE_CODE_OAUTH_TOKEN secret exists
@@ -360,7 +398,7 @@ fi
 
 # Check workflow authentication configuration
 WORKFLOWS_CONFIGURED=0
-for workflow in "claude-code-review.yml" "claude.yml" "claude-iterative-review.yml"; do
+for workflow in "claude-code-review.yml" "claude.yml" "claude-iterative-fix.yml"; do
     if [[ -f ".github/workflows/$workflow" ]]; then
         if grep -q "claude_code_oauth_token:" ".github/workflows/$workflow"; then
             echo "✅ $workflow configured to use OAuth token"
