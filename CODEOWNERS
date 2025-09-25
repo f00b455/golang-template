@@ -1,0 +1,46 @@
+# CODEOWNERS
+# This file defines who reviews and maintains different parts of the codebase.
+# Each line is a file pattern followed by one or more GitHub usernames or team names.
+# Later matches take precedence.
+
+# Default owners for everything in the repo
+*                       @f00b455
+
+# Go source files
+*.go                    @f00b455
+go.mod                  @f00b455
+go.sum                  @f00b455
+
+# API and backend
+/cmd/api/               @f00b455
+/internal/handlers/     @f00b455
+/internal/middleware/   @f00b455
+/pkg/                   @f00b455
+
+# CLI tools
+/cmd/cli/               @f00b455
+
+# Web application
+/cmd/web/               @f00b455
+
+# Features and BDD tests
+/features/              @f00b455
+*.feature               @f00b455
+
+# Documentation
+*.md                    @f00b455
+/docs/                  @f00b455
+
+# CI/CD and GitHub configuration
+/.github/               @f00b455
+/scripts/               @f00b455
+
+# Build and configuration
+Makefile                @f00b455
+.golangci.yml           @f00b455
+.env*                   @f00b455
+
+# Security-sensitive files require additional review
+SECURITY.md             @f00b455
+/internal/auth/         @f00b455
+/internal/security/     @f00b455

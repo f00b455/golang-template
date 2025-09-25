@@ -70,6 +70,12 @@ make lint-fix               # Auto-fix linting issues where possible
 
 ### Testing Principles:
 
+- **Behavior-Driven Development (BDD) First**: ALWAYS start with feature files before writing any code
+- **Red-Green-Refactor Cycle**:
+  1. **RED Phase**: Write feature files and scenarios that fail (no implementation yet)
+  2. **GREEN Phase**: Write minimal code to make tests pass
+  3. **REFACTOR Phase**: Improve code quality while keeping tests green
+- **Feature Files Before Code**: Every user story MUST have feature files written BEFORE implementation
 - **Test-Driven Development**: Write tests first when adding new features
 - **Mock External Dependencies**: Always use mocks for external services/APIs
 - **Test Database**: Always use test database, never production data

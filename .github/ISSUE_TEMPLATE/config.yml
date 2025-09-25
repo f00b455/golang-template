@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/f00b455/golang-template/security/advisories/new
+    about: Please report security vulnerabilities privately
+  - name: Documentation Issue
+    url: https://github.com/f00b455/golang-template/tree/main/docs
+    about: For documentation improvements, check existing docs first
+  - name: Questions & Discussions
+    url: https://github.com/f00b455/golang-template/discussions
+    about: Ask questions and discuss ideas with the community
