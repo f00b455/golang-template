@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"log"
 	"net/http"
@@ -13,6 +14,13 @@ import (
 	"github.com/f00b455/golang-template/internal/config"
 	"github.com/f00b455/golang-template/internal/handlers"
 	"github.com/f00b455/golang-template/pkg/shared"
+)
+
+// Constants for configuration
+const (
+	APITimeout      = 5 * time.Second
+	DefaultWebPort  = "8080"
+	MaxFilterLength = 100
 )
 
 type PageData struct {
@@ -54,7 +62,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = DefaultWebPort
 	}
 
 	log.Printf("Web server starting on port %s", port)
@@ -86,21 +94,31 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 
 func headlinesAPIHandler(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("filter")
-	headlines, totalCount, err := fetchHeadlinesWithCount(filter)
+
+	// Validate and sanitize filter input
+	if len(filter) > MaxFilterLength {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Filter too long"})
+		return
+	}
+	filter = html.EscapeString(filter)
+
+	headlinesResp, err := fetchHeadlinesWithData(filter)
 
 	w.Header().Set("Content-Type", "application/json")
 
 	if err != nil {
+		log.Printf("Error fetching headlines: %v", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unable to fetch headlines"})
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"headlines":  headlines,
+		"headlines":  headlinesResp.Headlines,
 		"updatedAt":  time.Now().Format(time.RFC3339),
 		"filter":     filter,
-		"totalCount": totalCount,
+		"totalCount": headlinesResp.TotalCount,
 	})
 }
 
@@ -113,7 +131,7 @@ func fetchHeadlines(filter string) ([]shared.RssHeadline, error) {
 	}
 
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: APITimeout,
 	}
 
 	resp, err := client.Get(apiURL)
@@ -134,24 +152,34 @@ func fetchHeadlines(filter string) ([]shared.RssHeadline, error) {
 	return response.Headlines, nil
 }
 
-func fetchHeadlinesWithCount(filter string) ([]shared.RssHeadline, int, error) {
-	// First fetch all headlines to get total count
-	allHeadlines, err := fetchHeadlines("")
-	if err != nil {
-		return nil, 0, err
-	}
-	totalCount := len(allHeadlines)
+func fetchHeadlinesWithData(filter string) (*handlers.HeadlinesResponse, error) {
+	// Single API call that returns both headlines and totalCount
+	apiURL := fmt.Sprintf("%s/api/rss/spiegel/top5", webConfig.APIURL)
 
-	// Then fetch with filter if provided
 	if filter != "" {
-		filteredHeadlines, err := fetchHeadlines(filter)
-		if err != nil {
-			return nil, 0, err
-		}
-		return filteredHeadlines, totalCount, nil
+		apiURL += "?filter=" + url.QueryEscape(filter)
 	}
 
-	return allHeadlines, totalCount, nil
+	client := &http.Client{
+		Timeout: APITimeout,
+	}
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var response handlers.HeadlinesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
 }
 
 func formatDate(dateStr string) string {

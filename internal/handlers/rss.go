@@ -285,7 +285,10 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 		}
 
 		headline, err := h.parseRSSItem(match[1])
-		if err == nil && headline != nil {
+		if err != nil {
+			// Log the error but continue processing other items
+			fmt.Printf("Error parsing RSS item: %v\n", err)
+		} else if headline != nil {
 			headlines = append(headlines, *headline)
 			if len(headlines) >= limit {
 				break

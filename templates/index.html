@@ -62,6 +62,7 @@
     <script>
         let allHeadlines = [];
         let currentFilter = '';
+        let debounceTimer = null;
 
         // Auto-refresh every 5 minutes
         setInterval(refreshHeadlines, 5 * 60 * 1000);
@@ -138,12 +139,21 @@
         }
 
         function filterHeadlines() {
-            const filterInput = document.getElementById('filter-input');
-            currentFilter = filterInput.value.toLowerCase();
-            refreshHeadlines();
+            // Clear existing timer
+            clearTimeout(debounceTimer);
+
+            // Set new timer with 300ms delay
+            debounceTimer = setTimeout(() => {
+                const filterInput = document.getElementById('filter-input');
+                currentFilter = filterInput.value.toLowerCase();
+                refreshHeadlines();
+            }, 300);
         }
 
         function clearFilter() {
+            // Clear any pending debounce timer
+            clearTimeout(debounceTimer);
+
             const filterInput = document.getElementById('filter-input');
             filterInput.value = '';
             currentFilter = '';
