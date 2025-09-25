@@ -50,6 +50,7 @@ func main() {
 		rssHandler := handlers.NewRSSHandler()
 		api.GET("/rss/spiegel/latest", rssHandler.GetLatest)
 		api.GET("/rss/spiegel/top5", rssHandler.GetTop5)
+		api.GET("/rss/spiegel/export", rssHandler.ExportHeadlines)
 	}
 
 	// Static files for terminal frontend
