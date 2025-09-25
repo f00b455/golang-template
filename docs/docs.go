@@ -107,6 +107,12 @@ const docTemplate = `{
                         "description": "Number of headlines to fetch (1-5)",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter headlines by keyword",
+                        "name": "filter",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -153,6 +159,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/shared.RssHeadline"
                     }
+                },
+                "totalCount": {
+                    "type": "integer"
                 }
             }
         },

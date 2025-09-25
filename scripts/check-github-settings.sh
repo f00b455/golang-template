@@ -273,6 +273,11 @@ STANDARD_LABELS=(
     "security:ee0000:Security vulnerability or improvement"
     "testing:bfd4f2:Related to tests and testing"
     "ci/cd:0e8a16:Continuous Integration/Deployment"
+    "frontend:0e8a16:Frontend related changes"
+    "backend:c5def5:Backend related changes"
+    "epic:5319e7:Large feature or collection of features"
+    "complex:b60205:Complex implementation requiring significant effort"
+    "high-priority:d73a4a:High priority issue that needs immediate attention"
 )
 
 # Get existing labels

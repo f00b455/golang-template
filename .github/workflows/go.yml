@@ -86,11 +86,3 @@ jobs:
       with:
         name: binaries
         path: bin/
-
-  validate:
-    name: Full Validation
-    runs-on: ubuntu-latest
-    needs: [lint, test, build]
-    steps:
-    - name: Validation Complete
-      run: echo "All validation checks passed!"
