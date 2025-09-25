@@ -30,6 +30,21 @@ type RSSHandler struct {
 	httpClient *http.Client
 }
 
+// CacheKey represents a structured cache key for RSS data
+type CacheKey struct {
+	Endpoint string
+	Filter   string
+	Limit    int
+}
+
+// String returns the cache key as a string
+func (k CacheKey) String() string {
+	if k.Limit > 0 {
+		return fmt.Sprintf("%s:filter=%s:limit=%d", k.Endpoint, k.Filter, k.Limit)
+	}
+	return fmt.Sprintf("%s:filter=%s", k.Endpoint, k.Filter)
+}
+
 type cacheEntry struct {
 	data      *shared.RssHeadline
 	timestamp time.Time
@@ -82,7 +97,7 @@ func NewRSSHandlerWithClient(client *http.Client) *RSSHandler {
 // @Router       /rss/spiegel/latest [get]
 func (h *RSSHandler) GetLatest(c *gin.Context) {
 	filter := c.Query("filter")
-	cacheKey := "latest:" + filter
+	cacheKey := CacheKey{Endpoint: "latest", Filter: filter}.String()
 
 	h.mu.RLock()
 	if cached, ok := h.cache[cacheKey]; ok && cached != nil && cached.data != nil && time.Since(cached.timestamp) < cacheTTL {
@@ -102,8 +117,8 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 	}
 
 	if headline == nil {
-		// Return empty response for no match
-		c.JSON(http.StatusOK, gin.H{})
+		// Return empty headline response for consistency
+		c.JSON(http.StatusOK, shared.RssHeadline{})
 		return
 	}
 
@@ -137,7 +152,7 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		limit = 5
 	}
 	filter := c.Query("filter")
-	cacheKey := fmt.Sprintf("top%d:%s", limit, filter)
+	cacheKey := CacheKey{Endpoint: "top", Filter: filter, Limit: limit}.String()
 
 	h.mu.RLock()
 	if cached, ok := h.multiCache[cacheKey]; ok && cached != nil && len(cached.data) > 0 && time.Since(cached.timestamp) < cacheTTL {
@@ -197,7 +212,6 @@ func (h *RSSHandler) fetchLatestHeadlineWithFilter(filter string) (*shared.RssHe
 	matches := itemRegex.FindAllStringSubmatch(rssText, -1)
 
 	// Filter and return first matching item
-	filterLower := strings.ToLower(filter)
 	for _, match := range matches {
 		if len(match) < 2 {
 			continue
@@ -206,7 +220,8 @@ func (h *RSSHandler) fetchLatestHeadlineWithFilter(filter string) (*shared.RssHe
 		if err != nil || headline == nil {
 			continue
 		}
-		if strings.Contains(strings.ToLower(headline.Title), filterLower) {
+		// Use pure function for filtering
+		if FilterHeadlineByTitle(headline, filter) {
 			return headline, nil
 		}
 	}
@@ -224,40 +239,28 @@ func (h *RSSHandler) fetchMultipleHeadlines(limit int) ([]shared.RssHeadline, er
 }
 
 func (h *RSSHandler) fetchMultipleHeadlinesWithFilter(limit int, filter string) ([]shared.RssHeadline, error) {
-	if filter == "" {
-		return h.fetchMultipleHeadlines(limit)
-	}
-
 	rssText, err := h.fetchRSSFeed()
 	if err != nil {
 		return nil, err
 	}
 
-	var headlines []shared.RssHeadline
-	filterLower := strings.ToLower(filter)
-
+	// Parse all RSS items first
+	var allHeadlines []shared.RssHeadline
 	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	// Get all items to filter through
 	matches := itemRegex.FindAllStringSubmatch(rssText, -1)
 
 	for _, match := range matches {
 		if len(match) < 2 {
 			continue
 		}
-
 		headline, err := h.parseRSSItem(match[1])
 		if err == nil && headline != nil {
-			// Apply filter (case-insensitive)
-			if strings.Contains(strings.ToLower(headline.Title), filterLower) {
-				headlines = append(headlines, *headline)
-				if len(headlines) >= limit {
-					break
-				}
-			}
+			allHeadlines = append(allHeadlines, *headline)
 		}
 	}
 
-	return headlines, nil
+	// Use pure function for filtering and limiting
+	return FilterHeadlinesByTitle(allHeadlines, filter, limit), nil
 }
 
 func (h *RSSHandler) fetchRSSFeed() (string, error) {
@@ -347,6 +350,42 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 	text = strings.ReplaceAll(text, "<![CDATA[", "")
 	text = strings.ReplaceAll(text, "]]>", "")
 	return strings.TrimSpace(text)
+}
+
+// Pure functions for filtering
+
+// FilterHeadlineByTitle filters a headline by title text (case-insensitive).
+// This is a pure function with no side effects.
+func FilterHeadlineByTitle(headline *shared.RssHeadline, filter string) bool {
+	if headline == nil || filter == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(headline.Title), strings.ToLower(filter))
+}
+
+// FilterHeadlinesByTitle filters headlines by title text (case-insensitive).
+// This is a pure function that returns a new slice without modifying the input.
+func FilterHeadlinesByTitle(headlines []shared.RssHeadline, filter string, limit int) []shared.RssHeadline {
+	if filter == "" {
+		if limit > 0 && len(headlines) > limit {
+			return headlines[:limit]
+		}
+		return headlines
+	}
+
+	filtered := make([]shared.RssHeadline, 0, len(headlines))
+	filterLower := strings.ToLower(filter)
+
+	for _, headline := range headlines {
+		if strings.Contains(strings.ToLower(headline.Title), filterLower) {
+			filtered = append(filtered, headline)
+			if limit > 0 && len(filtered) >= limit {
+				break
+			}
+		}
+	}
+
+	return filtered
 }
 
 // ResetCache resets both caches (for testing purposes).

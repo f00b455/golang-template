@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,10 +21,22 @@ import (
 )
 
 // Mock RSS transport for intercepting HTTP requests
-type mockRSSTransport struct{}
+type mockRSSTransport struct{
+	customFeed string
+}
 
 func (m *mockRSSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Return mock RSS XML for SPIEGEL feed
+	// Use custom feed if provided, otherwise use default
+	if m.customFeed != "" {
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBufferString(m.customFeed)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}
+
+	// Return mock RSS XML for SPIEGEL feed with various headlines for filtering
 	mockRSS := `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 	<channel>
@@ -31,34 +44,40 @@ func (m *mockRSSTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		<link>https://www.spiegel.de</link>
 		<description>Deutschlands führende Nachrichtenseite</description>
 		<item>
-			<title>Mock Headline 1</title>
+			<title>Breaking: Important headline news today</title>
 			<link>https://www.spiegel.de/article1</link>
 			<description>First mock article</description>
 			<pubDate>Mon, 25 Sep 2025 12:00:00 +0200</pubDate>
 		</item>
 		<item>
-			<title>Mock Headline 2</title>
+			<title>Latest tech news and updates</title>
 			<link>https://www.spiegel.de/article2</link>
 			<description>Second mock article</description>
 			<pubDate>Mon, 25 Sep 2025 11:00:00 +0200</pubDate>
 		</item>
 		<item>
-			<title>Mock Headline 3</title>
+			<title>Political headline of the day</title>
 			<link>https://www.spiegel.de/article3</link>
 			<description>Third mock article</description>
 			<pubDate>Mon, 25 Sep 2025 10:00:00 +0200</pubDate>
 		</item>
 		<item>
-			<title>Mock Headline 4</title>
+			<title>Sports news roundup</title>
 			<link>https://www.spiegel.de/article4</link>
 			<description>Fourth mock article</description>
 			<pubDate>Mon, 25 Sep 2025 09:00:00 +0200</pubDate>
 		</item>
 		<item>
-			<title>Mock Headline 5</title>
+			<title>Entertainment headline tonight</title>
 			<link>https://www.spiegel.de/article5</link>
 			<description>Fifth mock article</description>
 			<pubDate>Mon, 25 Sep 2025 08:00:00 +0200</pubDate>
+		</item>
+		<item>
+			<title>Business tech innovations</title>
+			<link>https://www.spiegel.de/article6</link>
+			<description>Sixth mock article</description>
+			<pubDate>Mon, 25 Sep 2025 07:00:00 +0200</pubDate>
 		</item>
 	</channel>
 </rss>`
@@ -77,6 +96,7 @@ type apiMockContext struct {
 	responseBody string
 	lastError    error
 	mockClient   *http.Client
+	mockTransport *mockRSSTransport
 }
 
 func (ctx *apiMockContext) setupRouter() {
@@ -103,9 +123,10 @@ func (ctx *apiMockContext) setupRouter() {
 }
 
 func (ctx *apiMockContext) theAPIServerIsRunning() error {
-	// Setup mock HTTP client for RSS feeds
+	// Setup mock transport and HTTP client for RSS feeds
+	ctx.mockTransport = &mockRSSTransport{}
 	ctx.mockClient = &http.Client{
-		Transport: &mockRSSTransport{},
+		Transport: ctx.mockTransport,
 		Timeout:   5 * time.Second,
 	}
 
@@ -328,11 +349,172 @@ func (ctx *apiMockContext) eachHeadlineShouldHaveTitleLinkPublishedAtAndSourceFi
 	return nil
 }
 
+// Filtering-specific step definitions
+
+func (ctx *apiMockContext) theRSSFeedContainsMultipleHeadlines() error {
+	// Default mock already contains multiple headlines
+	return nil
+}
+
+func (ctx *apiMockContext) theHeadlineTitleShouldContainCaseInsensitively(text string) error {
+	var headline shared.RssHeadline
+	if err := json.Unmarshal([]byte(ctx.responseBody), &headline); err != nil {
+		return fmt.Errorf("invalid headline JSON: %w", err)
+	}
+
+	textLower := strings.ToLower(text)
+	titleLower := strings.ToLower(headline.Title)
+
+	if !strings.Contains(titleLower, textLower) {
+		return fmt.Errorf("headline title '%s' does not contain '%s' (case-insensitive)", headline.Title, text)
+	}
+
+	return nil
+}
+
+func (ctx *apiMockContext) allHeadlinesShouldContainCaseInsensitively(text string) error {
+	var response struct {
+		Headlines []shared.RssHeadline `json:"headlines"`
+	}
+
+	if err := json.Unmarshal([]byte(ctx.responseBody), &response); err != nil {
+		return fmt.Errorf("invalid headlines response JSON: %w", err)
+	}
+
+	textLower := strings.ToLower(text)
+	for i, headline := range response.Headlines {
+		titleLower := strings.ToLower(headline.Title)
+		if !strings.Contains(titleLower, textLower) {
+			return fmt.Errorf("headline %d title '%s' does not contain '%s' (case-insensitive)", i, headline.Title, text)
+		}
+	}
+
+	return nil
+}
+
+func (ctx *apiMockContext) theHeadlinesArrayShouldHaveExactlyItemsOrFewer(expectedItems int) error {
+	var response struct {
+		Headlines []shared.RssHeadline `json:"headlines"`
+	}
+
+	if err := json.Unmarshal([]byte(ctx.responseBody), &response); err != nil {
+		return fmt.Errorf("invalid headlines response JSON: %w", err)
+	}
+
+	if len(response.Headlines) > expectedItems {
+		return fmt.Errorf("expected %d items or fewer, got %d", expectedItems, len(response.Headlines))
+	}
+
+	return nil
+}
+
+func (ctx *apiMockContext) theHeadlinesArrayShouldBeEmpty() error {
+	var response struct {
+		Headlines []shared.RssHeadline `json:"headlines"`
+	}
+
+	if err := json.Unmarshal([]byte(ctx.responseBody), &response); err != nil {
+		return fmt.Errorf("invalid headlines response JSON: %w", err)
+	}
+
+	if len(response.Headlines) != 0 {
+		return fmt.Errorf("expected empty headlines array, got %d items", len(response.Headlines))
+	}
+
+	return nil
+}
+
+func (ctx *apiMockContext) theResponseShouldBeAnEmptyObjectOrNullHeadline() error {
+	// Check if it's an empty object {} or a headline with empty values
+	var rawResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(ctx.responseBody), &rawResponse); err != nil {
+		return fmt.Errorf("invalid JSON response: %w", err)
+	}
+
+	// Empty object is valid
+	if len(rawResponse) == 0 {
+		return nil
+	}
+
+	// Check if it's an empty headline (all fields empty or missing)
+	var headline shared.RssHeadline
+	if err := json.Unmarshal([]byte(ctx.responseBody), &headline); err == nil {
+		if headline.Title == "" && headline.Link == "" && headline.PublishedAt == "" && headline.Source == "" {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("response is not an empty object or null headline")
+}
+
+func (ctx *apiMockContext) noFilteringShouldBeApplied() error {
+	// This is handled by the empty filter parameter test
+	// Verify that we get at least some headlines
+	var response struct {
+		Headlines []shared.RssHeadline `json:"headlines"`
+	}
+
+	if err := json.Unmarshal([]byte(ctx.responseBody), &response); err != nil {
+		return fmt.Errorf("invalid headlines response JSON: %w", err)
+	}
+
+	if len(response.Headlines) == 0 {
+		return fmt.Errorf("expected headlines when no filtering applied, got none")
+	}
+
+	return nil
+}
+
+func (ctx *apiMockContext) theRSSFeedHasHeadlinesWithInTitle(count int, text string) error {
+	// Set up a custom mock feed with specific headlines
+	var items string
+	for i := 0; i < count; i++ {
+		items += fmt.Sprintf(`
+		<item>
+			<title>%s article number %d</title>
+			<link>https://www.spiegel.de/tech%d</link>
+			<description>Tech article %d</description>
+			<pubDate>Mon, 25 Sep 2025 %02d:00:00 +0200</pubDate>
+		</item>`, text, i+1, i+1, i+1, 12-i)
+	}
+
+	// Add some non-matching headlines
+	for i := 0; i < 10; i++ {
+		items += fmt.Sprintf(`
+		<item>
+			<title>Other article number %d</title>
+			<link>https://www.spiegel.de/other%d</link>
+			<description>Other article %d</description>
+			<pubDate>Mon, 25 Sep 2025 %02d:00:00 +0200</pubDate>
+		</item>`, i+1, i+1, i+1, 11-i)
+	}
+
+	customFeed := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+	<channel>
+		<title>SPIEGEL ONLINE</title>
+		<link>https://www.spiegel.de</link>
+		<description>Test feed with specific content</description>%s
+	</channel>
+</rss>`, items)
+
+	ctx.mockTransport.customFeed = customFeed
+	return nil
+}
+
+func (ctx *apiMockContext) theRSSFeedHasHeadlinesWithoutInTitle(count int, text string) error {
+	// This is handled by the previous step - it adds both matching and non-matching headlines
+	return nil
+}
+
 func InitializeMockAPIScenario(ctx *godog.ScenarioContext) {
 	featureCtx := &apiMockContext{}
 
 	// Background steps
 	ctx.Step(`^the API server is running$`, featureCtx.theAPIServerIsRunning)
+	ctx.Step(`^the RSS feed contains multiple headlines$`, featureCtx.theRSSFeedContainsMultipleHeadlines)
+	ctx.Step(`^the RSS feed has (\d+) headlines with "([^"]+)" in title$`, featureCtx.theRSSFeedHasHeadlinesWithInTitle)
+	ctx.Step(`^the RSS feed has (\d+) headlines without "([^"]+)" in title$`, featureCtx.theRSSFeedHasHeadlinesWithoutInTitle)
 
 	// Action steps
 	ctx.Step(`^I make a GET request to "([^"]*)"$`, featureCtx.iMakeAGETRequestTo)
@@ -351,6 +533,14 @@ func InitializeMockAPIScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the headlines array should have (\d+) or more items?$`, featureCtx.theHeadlinesArrayShouldHaveOrMoreItems)
 	ctx.Step(`^each headline should have title, link, publishedAt, and source fields$`, featureCtx.eachHeadlineShouldHaveTitleLinkPublishedAtAndSourceFields)
 
+	// Filtering-specific steps
+	ctx.Step(`^the headline title should contain "([^"]+)" case-insensitively$`, featureCtx.theHeadlineTitleShouldContainCaseInsensitively)
+	ctx.Step(`^all headlines should contain "([^"]+)" case-insensitively$`, featureCtx.allHeadlinesShouldContainCaseInsensitively)
+	ctx.Step(`^the headlines array should have exactly (\d+) items? or fewer$`, featureCtx.theHeadlinesArrayShouldHaveExactlyItemsOrFewer)
+	ctx.Step(`^the headlines array should be empty$`, featureCtx.theHeadlinesArrayShouldBeEmpty)
+	ctx.Step(`^the response should be an empty object or null headline$`, featureCtx.theResponseShouldBeAnEmptyObjectOrNullHeadline)
+	ctx.Step(`^no filtering should be applied$`, featureCtx.noFilteringShouldBeApplied)
+
 	// Initialize router before each scenario
 	ctx.Before(func(ctx context.Context, scenario *godog.Scenario) (context.Context, error) {
 		// Initialize config to avoid nil pointer issues
@@ -364,7 +554,7 @@ func TestAPIFeatures(t *testing.T) {
 		ScenarioInitializer: InitializeMockAPIScenario,
 		Options: &godog.Options{
 			Format:   "pretty",
-			Paths:    []string{"api-greet.feature", "api-rss.feature"},
+			Paths:    []string{"api-greet.feature", "api-rss.feature", "rss-filtering.feature"},
 			TestingT: t,
 		},
 	}
