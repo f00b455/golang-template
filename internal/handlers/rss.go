@@ -19,6 +19,16 @@ import (
 const (
 	cacheTTL       = 5 * time.Minute
 	requestTimeout = 2 * time.Second
+	// maxFetchItems defines how many RSS items to fetch from the feed.
+	// We fetch 50 items to ensure filtering has enough data to search through,
+	// while keeping memory usage reasonable. This allows users to find content
+	// even if it doesn't appear in the first few items of the feed.
+	maxFetchItems = 50
+	// maxReturnItems defines the maximum number of items to return in the API response.
+	// This limit ensures consistent response sizes regardless of how many items match filters.
+	maxReturnItems = 5
+	// maxFilterLength is the maximum allowed length for filter parameters to prevent DoS
+	maxFilterLength = 100
 )
 
 // RSSHandler handles RSS-related requests.
@@ -124,63 +134,38 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 // @Param        limit    query     int     false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
 // @Param        filter   query     string  false  "Filter headlines by keyword"
 // @Success      200      {object}  HeadlinesResponse
+// @Failure      400      {object}  ErrorResponse
 // @Failure      503      {object}  ErrorResponse
 // @Router       /rss/spiegel/top5 [get]
 func (h *RSSHandler) GetTop5(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "5")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > 5 {
-		limit = 5
-	}
-
+	limit := h.parseLimit(c)
 	filterKeyword := c.Query("filter")
 
-	h.mu.RLock()
-	if len(h.multiCache.data) > 0 && time.Since(h.multiCache.timestamp) < cacheTTL {
-		headlines := h.multiCache.data
-		h.mu.RUnlock()
-
-		totalCount := len(headlines)
-		// Apply filter if provided
-		if filterKeyword != "" {
-			headlines = h.filterHeadlines(headlines, filterKeyword)
-		}
-
-		if len(headlines) > limit {
-			headlines = headlines[:limit]
-		}
-		c.JSON(http.StatusOK, HeadlinesResponse{
-			Headlines:  headlines,
-			TotalCount: totalCount,
-		})
-		return
-	}
-	h.mu.RUnlock()
-
-	headlines, err := h.fetchMultipleHeadlines(5)
-	if err != nil || len(headlines) == 0 {
-		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
-			Error: "Unable to fetch RSS feed",
+	// Validate filter parameter
+	if err := h.validateFilter(filterKeyword); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: err.Error(),
 		})
 		return
 	}
 
-	h.mu.Lock()
-	h.multiCache = &multiCacheEntry{
-		data:      headlines,
-		timestamp: time.Now(),
+	// Try to get headlines from cache
+	headlines, totalCount := h.getCachedHeadlines()
+	if headlines == nil {
+		// Cache miss - fetch from RSS feed
+		var err error
+		headlines, err = h.fetchAndCacheHeadlines()
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, ErrorResponse{
+				Error: "Unable to fetch RSS feed",
+			})
+			return
+		}
+		totalCount = len(headlines)
 	}
-	h.mu.Unlock()
 
-	totalCount := len(headlines)
-	// Apply filter if provided
-	if filterKeyword != "" {
-		headlines = h.filterHeadlines(headlines, filterKeyword)
-	}
-
-	if len(headlines) > limit {
-		headlines = headlines[:limit]
-	}
+	// Apply filter and limit
+	headlines = h.applyFilterAndLimit(headlines, filterKeyword, limit)
 
 	c.JSON(http.StatusOK, HeadlinesResponse{
 		Headlines:  headlines,
@@ -303,6 +288,66 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 	text = strings.ReplaceAll(text, "<![CDATA[", "")
 	text = strings.ReplaceAll(text, "]]>", "")
 	return strings.TrimSpace(text)
+}
+
+// parseLimit extracts and validates the limit parameter from the request.
+func (h *RSSHandler) parseLimit(c *gin.Context) int {
+	limitStr := c.DefaultQuery("limit", "5")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 || limit > maxReturnItems {
+		return maxReturnItems
+	}
+	return limit
+}
+
+// validateFilter validates the filter parameter.
+func (h *RSSHandler) validateFilter(filter string) error {
+	if len(filter) > maxFilterLength {
+		return fmt.Errorf("filter parameter too long (max %d characters)", maxFilterLength)
+	}
+	return nil
+}
+
+// getCachedHeadlines retrieves headlines from cache if available.
+func (h *RSSHandler) getCachedHeadlines() ([]shared.RssHeadline, int) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if len(h.multiCache.data) > 0 && time.Since(h.multiCache.timestamp) < cacheTTL {
+		// Return a copy to avoid race conditions
+		headlines := make([]shared.RssHeadline, len(h.multiCache.data))
+		copy(headlines, h.multiCache.data)
+		return headlines, len(headlines)
+	}
+	return nil, 0
+}
+
+// fetchAndCacheHeadlines fetches headlines from RSS feed and updates the cache.
+func (h *RSSHandler) fetchAndCacheHeadlines() ([]shared.RssHeadline, error) {
+	headlines, err := h.fetchMultipleHeadlines(maxFetchItems)
+	if err != nil || len(headlines) == 0 {
+		return nil, err
+	}
+
+	h.mu.Lock()
+	h.multiCache = &multiCacheEntry{
+		data:      headlines,
+		timestamp: time.Now(),
+	}
+	h.mu.Unlock()
+
+	return headlines, nil
+}
+
+// applyFilterAndLimit applies the filter keyword and limit to headlines.
+func (h *RSSHandler) applyFilterAndLimit(headlines []shared.RssHeadline, filter string, limit int) []shared.RssHeadline {
+	if filter != "" {
+		headlines = h.filterHeadlines(headlines, filter)
+	}
+	if len(headlines) > limit {
+		headlines = headlines[:limit]
+	}
+	return headlines
 }
 
 // filterHeadlines filters headlines based on a keyword (case-insensitive).

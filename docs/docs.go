@@ -122,6 +122,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.HeadlinesResponse"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
