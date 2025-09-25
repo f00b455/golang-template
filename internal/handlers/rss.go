@@ -47,7 +47,8 @@ type ErrorResponse struct {
 
 // HeadlinesResponse represents the response for multiple headlines.
 type HeadlinesResponse struct {
-	Headlines []shared.RssHeadline `json:"headlines"`
+	Headlines  []shared.RssHeadline `json:"headlines"`
+	TotalCount int                  `json:"totalCount,omitempty"`
 }
 
 // NewRSSHandler creates a new RSSHandler.
@@ -120,7 +121,8 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 // @Tags         rss
 // @Accept       json
 // @Produce      json
-// @Param        limit    query     int  false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        limit    query     int     false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        filter   query     string  false  "Filter headlines by keyword"
 // @Success      200      {object}  HeadlinesResponse
 // @Failure      503      {object}  ErrorResponse
 // @Router       /rss/spiegel/top5 [get]
@@ -131,14 +133,26 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		limit = 5
 	}
 
+	filterKeyword := c.Query("filter")
+
 	h.mu.RLock()
 	if len(h.multiCache.data) > 0 && time.Since(h.multiCache.timestamp) < cacheTTL {
 		headlines := h.multiCache.data
+		h.mu.RUnlock()
+
+		totalCount := len(headlines)
+		// Apply filter if provided
+		if filterKeyword != "" {
+			headlines = h.filterHeadlines(headlines, filterKeyword)
+		}
+
 		if len(headlines) > limit {
 			headlines = headlines[:limit]
 		}
-		h.mu.RUnlock()
-		c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
+		c.JSON(http.StatusOK, HeadlinesResponse{
+			Headlines:  headlines,
+			TotalCount: totalCount,
+		})
 		return
 	}
 	h.mu.RUnlock()
@@ -158,11 +172,20 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 	}
 	h.mu.Unlock()
 
+	totalCount := len(headlines)
+	// Apply filter if provided
+	if filterKeyword != "" {
+		headlines = h.filterHeadlines(headlines, filterKeyword)
+	}
+
 	if len(headlines) > limit {
 		headlines = headlines[:limit]
 	}
 
-	c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
+	c.JSON(http.StatusOK, HeadlinesResponse{
+		Headlines:  headlines,
+		TotalCount: totalCount,
+	})
 }
 
 func (h *RSSHandler) fetchLatestHeadline() (*shared.RssHeadline, error) {
@@ -262,7 +285,10 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 		}
 
 		headline, err := h.parseRSSItem(match[1])
-		if err == nil && headline != nil {
+		if err != nil {
+			// Log the error but continue processing other items
+			fmt.Printf("Error parsing RSS item: %v\n", err)
+		} else if headline != nil {
 			headlines = append(headlines, *headline)
 			if len(headlines) >= limit {
 				break
@@ -277,6 +303,24 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 	text = strings.ReplaceAll(text, "<![CDATA[", "")
 	text = strings.ReplaceAll(text, "]]>", "")
 	return strings.TrimSpace(text)
+}
+
+// filterHeadlines filters headlines based on a keyword (case-insensitive).
+func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword string) []shared.RssHeadline {
+	if keyword == "" {
+		return headlines
+	}
+
+	keyword = strings.ToLower(keyword)
+	var filtered []shared.RssHeadline
+
+	for _, headline := range headlines {
+		if strings.Contains(strings.ToLower(headline.Title), keyword) {
+			filtered = append(filtered, headline)
+		}
+	}
+
+	return filtered
 }
 
 // ResetCache resets both caches (for testing purposes).

@@ -3,15 +3,24 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
 	"github.com/f00b455/golang-template/internal/config"
 	"github.com/f00b455/golang-template/internal/handlers"
 	"github.com/f00b455/golang-template/pkg/shared"
+)
+
+// Constants for configuration
+const (
+	APITimeout      = 5 * time.Second
+	DefaultWebPort  = "8080"
+	MaxFilterLength = 100
 )
 
 type PageData struct {
@@ -21,11 +30,23 @@ type PageData struct {
 	Error     string
 }
 
-var templates *template.Template
+type WebConfig struct {
+	APIURL string
+}
+
+var (
+	templates *template.Template
+	webConfig *WebConfig
+)
 
 func main() {
-	// Load config (currently unused, but may be needed for future settings)
-	_ = config.Load()
+	// Load config
+	cfg := config.Load()
+
+	// Initialize web config
+	webConfig = &WebConfig{
+		APIURL: getEnv("API_URL", fmt.Sprintf("http://localhost:%s", cfg.Port)),
+	}
 
 	// Parse templates
 	funcMap := template.FuncMap{
@@ -41,7 +62,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = DefaultWebPort
 	}
 
 	log.Printf("Web server starting on port %s", port)
@@ -54,7 +75,7 @@ func main() {
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch headlines from API
-	headlines, err := fetchHeadlines()
+	headlines, err := fetchHeadlines("")
 
 	data := PageData{
 		Title:     "SPIEGEL Headlines",
@@ -72,28 +93,45 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func headlinesAPIHandler(w http.ResponseWriter, r *http.Request) {
-	headlines, err := fetchHeadlines()
+	filter := r.URL.Query().Get("filter")
+
+	// Validate and sanitize filter input
+	if len(filter) > MaxFilterLength {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Filter too long"})
+		return
+	}
+	filter = html.EscapeString(filter)
+
+	headlinesResp, err := fetchHeadlinesWithData(filter)
 
 	w.Header().Set("Content-Type", "application/json")
 
 	if err != nil {
+		log.Printf("Error fetching headlines: %v", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unable to fetch headlines"})
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"headlines": headlines,
-		"updatedAt": time.Now().Format(time.RFC3339),
+		"headlines":  headlinesResp.Headlines,
+		"updatedAt":  time.Now().Format(time.RFC3339),
+		"filter":     filter,
+		"totalCount": headlinesResp.TotalCount,
 	})
 }
 
-func fetchHeadlines() ([]shared.RssHeadline, error) {
+func fetchHeadlines(filter string) ([]shared.RssHeadline, error) {
 	// Fetch from the API server
-	apiURL := "http://localhost:3002/api/rss/spiegel/top5"
+	apiURL := fmt.Sprintf("%s/api/rss/spiegel/top5", webConfig.APIURL)
+
+	if filter != "" {
+		apiURL += "?filter=" + url.QueryEscape(filter)
+	}
 
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: APITimeout,
 	}
 
 	resp, err := client.Get(apiURL)
@@ -114,6 +152,36 @@ func fetchHeadlines() ([]shared.RssHeadline, error) {
 	return response.Headlines, nil
 }
 
+func fetchHeadlinesWithData(filter string) (*handlers.HeadlinesResponse, error) {
+	// Single API call that returns both headlines and totalCount
+	apiURL := fmt.Sprintf("%s/api/rss/spiegel/top5", webConfig.APIURL)
+
+	if filter != "" {
+		apiURL += "?filter=" + url.QueryEscape(filter)
+	}
+
+	client := &http.Client{
+		Timeout: APITimeout,
+	}
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var response handlers.HeadlinesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
 func formatDate(dateStr string) string {
 	// Parse the date
 	t, err := time.Parse(time.RFC3339, dateStr)
@@ -128,4 +196,11 @@ func formatDate(dateStr string) string {
 	}
 
 	return t.In(loc).Format("02.01.2006 15:04")
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
