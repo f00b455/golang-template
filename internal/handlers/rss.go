@@ -76,20 +76,26 @@ func NewRSSHandlerWithClient(client *http.Client) *RSSHandler {
 // @Tags         rss
 // @Accept       json
 // @Produce      json
+// @Param        filter   query     string  false  "Filter headlines by keyword (case-insensitive)"
 // @Success      200  {object}  shared.RssHeadline
 // @Failure      503  {object}  ErrorResponse
 // @Router       /rss/spiegel/latest [get]
 func (h *RSSHandler) GetLatest(c *gin.Context) {
-	h.mu.RLock()
-	if h.cache.data != nil && time.Since(h.cache.timestamp) < cacheTTL {
-		headline := *h.cache.data
-		h.mu.RUnlock()
-		c.JSON(http.StatusOK, headline)
-		return
-	}
-	h.mu.RUnlock()
+	filter := c.Query("filter")
 
-	headline, err := h.fetchLatestHeadline()
+	// Skip cache if filter is provided for now
+	if filter == "" {
+		h.mu.RLock()
+		if h.cache.data != nil && time.Since(h.cache.timestamp) < cacheTTL {
+			headline := *h.cache.data
+			h.mu.RUnlock()
+			c.JSON(http.StatusOK, headline)
+			return
+		}
+		h.mu.RUnlock()
+	}
+
+	headline, err := h.fetchLatestHeadlineWithFilter(filter)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 			Error: "Unable to fetch RSS feed",
@@ -104,12 +110,15 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 		return
 	}
 
-	h.mu.Lock()
-	h.cache = &cacheEntry{
-		data:      headline,
-		timestamp: time.Now(),
+	// Only cache unfiltered results
+	if filter == "" {
+		h.mu.Lock()
+		h.cache = &cacheEntry{
+			data:      headline,
+			timestamp: time.Now(),
+		}
+		h.mu.Unlock()
 	}
-	h.mu.Unlock()
 
 	c.JSON(http.StatusOK, *headline)
 }
@@ -120,7 +129,8 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 // @Tags         rss
 // @Accept       json
 // @Produce      json
-// @Param        limit    query     int  false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        limit    query     int     false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        filter   query     string  false  "Filter headlines by keyword (case-insensitive)"
 // @Success      200      {object}  HeadlinesResponse
 // @Failure      503      {object}  ErrorResponse
 // @Router       /rss/spiegel/top5 [get]
@@ -131,64 +141,44 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 		limit = 5
 	}
 
-	h.mu.RLock()
-	if len(h.multiCache.data) > 0 && time.Since(h.multiCache.timestamp) < cacheTTL {
-		headlines := h.multiCache.data
-		if len(headlines) > limit {
-			headlines = headlines[:limit]
+	filter := c.Query("filter")
+
+	// Skip cache if filter is provided
+	if filter == "" {
+		h.mu.RLock()
+		if len(h.multiCache.data) > 0 && time.Since(h.multiCache.timestamp) < cacheTTL {
+			headlines := h.multiCache.data
+			if len(headlines) > limit {
+				headlines = headlines[:limit]
+			}
+			h.mu.RUnlock()
+			c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
+			return
 		}
 		h.mu.RUnlock()
-		c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
-		return
 	}
-	h.mu.RUnlock()
 
-	headlines, err := h.fetchMultipleHeadlines(5)
-	if err != nil || len(headlines) == 0 {
+	headlines, err := h.fetchMultipleHeadlinesWithFilter(limit, filter)
+	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 			Error: "Unable to fetch RSS feed",
 		})
 		return
 	}
 
-	h.mu.Lock()
-	h.multiCache = &multiCacheEntry{
-		data:      headlines,
-		timestamp: time.Now(),
-	}
-	h.mu.Unlock()
-
-	if len(headlines) > limit {
-		headlines = headlines[:limit]
+	// Only cache unfiltered results
+	if filter == "" && len(headlines) > 0 {
+		h.mu.Lock()
+		h.multiCache = &multiCacheEntry{
+			data:      headlines,
+			timestamp: time.Now(),
+		}
+		h.mu.Unlock()
 	}
 
 	c.JSON(http.StatusOK, HeadlinesResponse{Headlines: headlines})
 }
 
-func (h *RSSHandler) fetchLatestHeadline() (*shared.RssHeadline, error) {
-	rssText, err := h.fetchRSSFeed()
-	if err != nil {
-		return nil, err
-	}
-
-	// Find first item in RSS feed
-	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	matches := itemRegex.FindStringSubmatch(rssText)
-	if len(matches) < 2 {
-		return nil, fmt.Errorf("no RSS items found")
-	}
-
-	return h.parseRSSItem(matches[1])
-}
-
-func (h *RSSHandler) fetchMultipleHeadlines(limit int) ([]shared.RssHeadline, error) {
-	rssText, err := h.fetchRSSFeed()
-	if err != nil {
-		return nil, err
-	}
-
-	return h.parseMultipleRSSItems(rssText, limit), nil
-}
 
 func (h *RSSHandler) fetchRSSFeed() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
@@ -254,7 +244,7 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 	var headlines []shared.RssHeadline
 
 	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	matches := itemRegex.FindAllStringSubmatch(rssText, limit)
+	matches := itemRegex.FindAllStringSubmatch(rssText, -1) // Get all matches
 
 	for _, match := range matches {
 		if len(match) < 2 {
@@ -264,7 +254,7 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 		headline, err := h.parseRSSItem(match[1])
 		if err == nil && headline != nil {
 			headlines = append(headlines, *headline)
-			if len(headlines) >= limit {
+			if limit > 0 && len(headlines) >= limit {
 				break
 			}
 		}
@@ -277,6 +267,77 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 	text = strings.ReplaceAll(text, "<![CDATA[", "")
 	text = strings.ReplaceAll(text, "]]>", "")
 	return strings.TrimSpace(text)
+}
+
+// fetchLatestHeadlineWithFilter fetches the latest headline matching the filter
+func (h *RSSHandler) fetchLatestHeadlineWithFilter(filter string) (*shared.RssHeadline, error) {
+	rssText, err := h.fetchRSSFeed()
+	if err != nil {
+		return nil, err
+	}
+
+	// Find all items in RSS feed
+	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
+	matches := itemRegex.FindAllStringSubmatch(rssText, -1)
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+
+		headline, err := h.parseRSSItem(match[1])
+		if err != nil || headline == nil {
+			continue
+		}
+
+		// Apply filter if provided
+		if filter != "" && !h.matchesFilter(headline.Title, filter) {
+			continue
+		}
+
+		return headline, nil
+	}
+
+	return nil, fmt.Errorf("no RSS items found matching filter")
+}
+
+// fetchMultipleHeadlinesWithFilter fetches multiple headlines matching the filter
+func (h *RSSHandler) fetchMultipleHeadlinesWithFilter(limit int, filter string) ([]shared.RssHeadline, error) {
+	rssText, err := h.fetchRSSFeed()
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse all items first
+	allHeadlines := h.parseMultipleRSSItems(rssText, -1) // Get all items
+
+	// Apply filter if provided
+	if filter != "" {
+		var filtered []shared.RssHeadline
+		for _, headline := range allHeadlines {
+			if h.matchesFilter(headline.Title, filter) {
+				filtered = append(filtered, headline)
+				if len(filtered) >= limit {
+					break
+				}
+			}
+		}
+		return filtered, nil
+	}
+
+	// No filter, return up to limit items
+	if len(allHeadlines) > limit {
+		return allHeadlines[:limit], nil
+	}
+	return allHeadlines, nil
+}
+
+// matchesFilter checks if text contains the filter keyword (case-insensitive)
+func (h *RSSHandler) matchesFilter(text, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(text), strings.ToLower(filter))
 }
 
 // ResetCache resets both caches (for testing purposes).
