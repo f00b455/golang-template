@@ -233,6 +233,7 @@ Another Claude workflow is currently running. This iterative review will wait fo
 
           # Run validation pipeline
           echo "changes_applied=true" >> $GITHUB_OUTPUT
+          VALIDATION_FAILED=false
 
           # Build validation
           if make build; then
@@ -240,8 +241,8 @@ Another Claude workflow is currently running. This iterative review will wait fo
             echo "✅ Build successful"
           else
             echo "build_status=failed" >> $GITHUB_OUTPUT
-            echo "❌ Build failed"
-            exit 1
+            echo "❌ Build failed - will be addressed in next iteration"
+            VALIDATION_FAILED=true
           fi
 
           # Test validation
@@ -250,8 +251,8 @@ Another Claude workflow is currently running. This iterative review will wait fo
             echo "✅ Tests passed"
           else
             echo "test_status=failed" >> $GITHUB_OUTPUT
-            echo "❌ Tests failed"
-            exit 1
+            echo "❌ Tests failed - will be addressed in next iteration"
+            VALIDATION_FAILED=true
           fi
 
           # Lint validation
@@ -259,15 +260,21 @@ Another Claude workflow is currently running. This iterative review will wait fo
             echo "lint_status=success" >> $GITHUB_OUTPUT
             echo "✅ Linting passed"
           else
-            echo "lint_status=success" >> $GITHUB_OUTPUT
+            echo "lint_status=warnings" >> $GITHUB_OUTPUT
             echo "⚠️ Linting issues found (non-blocking)"
           fi
 
-          echo "validation_result=success" >> $GITHUB_OUTPUT
+          # Set validation result - don't fail the job, let next iteration fix issues
+          if [ "$VALIDATION_FAILED" = "true" ]; then
+            echo "validation_result=failed_continue" >> $GITHUB_OUTPUT
+            echo "🔄 Validation issues found - continuing to next iteration for fixes"
+          else
+            echo "validation_result=success" >> $GITHUB_OUTPUT
+          fi
 
       - name: Commit Changes
         id: commit
-        if: steps.validate.outputs.changes_applied == 'true' && steps.validate.outputs.validation_result == 'success'
+        if: steps.validate.outputs.changes_applied == 'true' && (steps.validate.outputs.validation_result == 'success' || steps.validate.outputs.validation_result == 'failed_continue')
         run: |
           # Configure git
           git config --local user.email "action@github.com"
@@ -343,23 +350,53 @@ Run ID: ${{ github.run_id }}"
                 REPORT="$REPORT
 - ✅ **Changes Committed**: Fixes pushed to PR branch"
               fi
+            elif [ "${{ steps.validate.outputs.validation_result }}" = "failed_continue" ]; then
+              REPORT="$REPORT
+- ⚠️ **Fixes Applied**: Code changes applied, but validation issues found
+- ⚠️ **Validation**: Build [${{ steps.validate.outputs.build_status }}] | Tests [${{ steps.validate.outputs.test_status }}] | Lint [${{ steps.validate.outputs.lint_status }}]"
+
+              if [ "${{ steps.commit.outputs.commit_created }}" = "true" ]; then
+                REPORT="$REPORT
+- ✅ **Changes Committed**: Fixes committed for next iteration to address"
+              fi
             else
               REPORT="$REPORT
-- ❌ **Validation Failed**: Issues found during validation"
+- ❌ **Validation Failed**: Critical issues found during validation"
             fi
           else
             REPORT="$REPORT
 - ℹ️ **No Fixes Needed**: No actionable issues found in review"
           fi
 
-          # Check if more iterations are possible
+          # Check if more iterations are possible and auto-continuation logic
           if [ $ITERATION_NUM -lt $MAX_ITERATIONS ]; then
-            REPORT="$REPORT
+            if [ "${{ steps.commit.outputs.commit_created }}" = "true" ] && ([ "${{ steps.parse-review.outputs.has_actionable_fixes }}" = "true" ] || [ "${{ steps.validate.outputs.validation_result }}" = "failed_continue" ]); then
+              if [ "${{ steps.validate.outputs.validation_result }}" = "failed_continue" ]; then
+                REPORT="$REPORT
+
+### Next Steps
+- 🔄 **Auto-continuing**: Next iteration will start automatically
+- **Reason**: Build/test issues found, will fix in next iteration
+- **Progress**: $ITERATION_NUM/$MAX_ITERATIONS iterations used
+- Manual trigger available: Comment \`@claude fix review issues\`"
+              else
+                REPORT="$REPORT
+
+### Next Steps
+- 🔄 **Auto-continuing**: Next iteration will start automatically
+- **Reason**: Fixes were applied, more improvements possible
+- **Progress**: $ITERATION_NUM/$MAX_ITERATIONS iterations used
+- Manual trigger available: Comment \`@claude fix review issues\`"
+              fi
+            else
+              REPORT="$REPORT
 
 ### Next Steps
 - More iterations available ($ITERATION_NUM/$MAX_ITERATIONS used)
+- **No auto-continuation**: No fixes were applied this round
 - Comment \`@claude fix review issues\` to trigger next iteration
 - Or manually run workflow dispatch with PR #$PR_NUMBER"
+            fi
           else
             REPORT="$REPORT
 
@@ -377,6 +414,51 @@ Run ID: ${{ github.run_id }}"
           gh pr comment $PR_NUMBER --body "$REPORT"
 
           echo "📊 Results report posted to PR"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-Continue Next Iteration
+        id: auto-continue
+        if: |
+          steps.commit.outputs.commit_created == 'true' &&
+          steps.iteration-setup.outputs.next_iteration < env.MAX_ITERATIONS &&
+          (steps.parse-review.outputs.has_actionable_fixes == 'true' || steps.validate.outputs.validation_result == 'failed_continue')
+        run: |
+          CURRENT_ITERATION=${{ steps.iteration-setup.outputs.next_iteration }}
+          NEXT_ITERATION=$((CURRENT_ITERATION + 1))
+
+          echo "🔄 Changes were applied in iteration $CURRENT_ITERATION"
+          echo "🚀 Automatically triggering next iteration $NEXT_ITERATION/$MAX_ITERATIONS"
+
+          # Determine the reason for continuation
+          if [ "${{ steps.validate.outputs.validation_result }}" = "failed_continue" ]; then
+            CONTINUE_REASON="Build/test issues found, will fix in next iteration"
+            STATUS_EMOJI="⚠️"
+          else
+            CONTINUE_REASON="Actionable fixes were found and applied, continuing automatically"
+            STATUS_EMOJI="✅"
+          fi
+
+          # Wait a moment to ensure the commit is fully processed
+          sleep 10
+
+          # Trigger the next iteration automatically
+          gh workflow run claude-iterative-review.yml \
+            -f pr_number="$PR_NUMBER" \
+            -f max_iterations="$MAX_ITERATIONS"
+
+          echo "✅ Next iteration triggered automatically"
+
+          # Update the report to indicate auto-continuation
+          gh pr comment $PR_NUMBER --body "## 🔄 Auto-Continuing Iterative Review
+
+$STATUS_EMOJI **Iteration $CURRENT_ITERATION completed with changes applied.**
+
+**Next Action**: Automatically triggered iteration $NEXT_ITERATION/$MAX_ITERATIONS
+**Reason**: $CONTINUE_REASON
+
+---
+*This iteration will start shortly and continue the review process*"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
