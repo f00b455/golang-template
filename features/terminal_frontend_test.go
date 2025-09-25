@@ -2,6 +2,7 @@ package features
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,10 +63,13 @@ func (t *terminalFrontendContext) iAmOnTheTerminalThemedFrontend() error {
 	t.loadTime = time.Since(start)
 	t.response = resp
 
-	// Read page content for verification
-	buf := make([]byte, 8192)
-	n, _ := resp.Body.Read(buf)
-	t.pageContent = string(buf[:n])
+	// Read entire page content for verification
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+	t.pageContent = string(body)
+	resp.Body.Close()
 
 	return nil
 }
