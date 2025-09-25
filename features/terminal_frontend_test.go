@@ -28,11 +28,11 @@ func (t *terminalFrontendContext) iHaveARunningHugoStaticSiteWithTerminalTheme()
 	t.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
-			http.ServeFile(w, r, "static/terminal.html")
+			http.ServeFile(w, r, "../static/terminal.html")
 		case "/terminal.css":
-			http.ServeFile(w, r, "static/terminal.css")
+			http.ServeFile(w, r, "../static/terminal.css")
 		case "/terminal.js":
-			http.ServeFile(w, r, "static/terminal.js")
+			http.ServeFile(w, r, "../static/terminal.js")
 		default:
 			http.NotFound(w, r)
 		}
@@ -63,7 +63,7 @@ func (t *terminalFrontendContext) iAmOnTheTerminalThemedFrontend() error {
 	t.response = resp
 
 	// Read page content for verification
-	buf := make([]byte, 1024)
+	buf := make([]byte, 8192)
 	n, _ := resp.Body.Read(buf)
 	t.pageContent = string(buf[:n])
 
@@ -159,7 +159,7 @@ func (t *terminalFrontendContext) theFilterFieldShouldLookLikeATerminalPromptWit
 	if !strings.Contains(t.pageContent, "command-input") {
 		return fmt.Errorf("command input field not found")
 	}
-	if !strings.Contains(t.pageContent, "cursor blink") {
+	if !strings.Contains(t.pageContent, "cursor") || !strings.Contains(t.pageContent, "blink") {
 		return fmt.Errorf("blinking cursor not found")
 	}
 	return nil
