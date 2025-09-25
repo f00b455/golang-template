@@ -131,12 +131,12 @@ if [[ "$PROTECTION" == *"Branch not protected"* ]] || [[ "$PROTECTION" == "{}" ]
         echo "   - Protecting branch from deletion"
 
         # Set up branch protection: require PR, no direct pushes
-        # Create JSON payload for branch protection
+        # Create JSON payload for branch protection with required status checks
         cat > /tmp/branch-protection.json << EOF
 {
   "required_status_checks": {
-    "strict": false,
-    "contexts": []
+    "strict": true,
+    "contexts": ["Lint", "Test", "Build"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -182,6 +182,40 @@ else
         PROTECTION_NEEDS_FIX=true
     fi
 
+    # Check required status checks
+    STATUS_CHECKS=$(echo "$PROTECTION" | jq -r '.required_status_checks // null')
+    if [[ "$STATUS_CHECKS" != "null" ]]; then
+        STRICT=$(echo "$STATUS_CHECKS" | jq -r '.strict // false')
+        CONTEXTS=$(echo "$STATUS_CHECKS" | jq -r '.contexts[]? // empty' | tr '\n' ' ')
+
+        if [[ "$STRICT" == "true" ]]; then
+            echo "   ✅ Strict status checks enabled"
+        else
+            echo "   ❌ Strict status checks disabled (should be enabled)"
+            PROTECTION_NEEDS_FIX=true
+        fi
+
+        REQUIRED_CONTEXTS=("Lint" "Test" "Build")
+        MISSING_CONTEXTS=()
+
+        for context in "${REQUIRED_CONTEXTS[@]}"; do
+            if [[ "$CONTEXTS" == *"$context"* ]]; then
+                echo "   ✅ Required status check: $context"
+            else
+                echo "   ❌ Missing required status check: $context"
+                MISSING_CONTEXTS+=("$context")
+                PROTECTION_NEEDS_FIX=true
+            fi
+        done
+
+        if [[ ${#MISSING_CONTEXTS[@]} -eq 0 ]]; then
+            echo "   ✅ All required status checks configured"
+        fi
+    else
+        echo "   ❌ No status checks configured (Lint, Test, Build required)"
+        PROTECTION_NEEDS_FIX=true
+    fi
+
     # Fix existing branch protection if needed
     if [[ "$PROTECTION_NEEDS_FIX" == "true" ]] && [[ "$FIX_MODE" == "true" ]]; then
         echo -e "\n🔧 Updating branch protection settings..."
@@ -192,10 +226,13 @@ else
         CURRENT_RESTRICTIONS=$(echo "$PROTECTION" | jq '.restrictions // null')
         CURRENT_ENFORCE_ADMINS=$(echo "$PROTECTION" | jq -r '.enforce_admins.enabled // false')
 
-        # Create JSON payload for updating branch protection
+        # Create JSON payload for updating branch protection with required status checks
         cat > /tmp/branch-protection-update.json << EOF
 {
-  "required_status_checks": $CURRENT_STATUS_CHECKS,
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["Lint", "Test", "Build"]
+  },
   "enforce_admins": $CURRENT_ENFORCE_ADMINS,
   "required_pull_request_reviews": $CURRENT_PR_REVIEWS,
   "restrictions": $CURRENT_RESTRICTIONS,

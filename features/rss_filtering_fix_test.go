@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/f00b455/golang-template/internal/handlers"
 	"github.com/f00b455/golang-template/internal/testutil"
 )
 
@@ -21,11 +20,9 @@ type rssFilteringContext struct {
 func (ctx *rssFilteringContext) theRSSFeedContainsHeadlinesWithVariousKeywords() error {
 	// Set up the API context with large RSS feed using shared mock
 	mockTransport := testutil.NewLargeMockRSSTransport("test-keyword-xyz", 11, 15)
-	ctx.apiCtx = &apiMockContext{
-		mockClient: &http.Client{
-			Transport: mockTransport,
-			Timeout:   5 * time.Second,
-		},
+	ctx.apiCtx.mockClient = &http.Client{
+		Transport: mockTransport,
+		Timeout:   5 * time.Second,
 	}
 	ctx.apiCtx.setupRouter()
 	return nil
@@ -133,9 +130,10 @@ func InitializeRSSFilteringFixTestSuite(ctx *godog.TestSuiteContext) {
 }
 
 func InitializeRSSFilteringFixScenario(ctx *godog.ScenarioContext) {
-	rssCtx := &rssFilteringContext{
-		apiCtx: &apiMockContext{},
-	}
+	rssCtx := &rssFilteringContext{}
+
+	// Initialize apiCtx first so it can be used by the steps
+	rssCtx.apiCtx = &apiMockContext{}
 
 	// Background steps
 	ctx.Step(`^the API server is running$`, rssCtx.apiCtx.theAPIServerIsRunning)
@@ -196,10 +194,7 @@ func InitializeRSSFilteringFixScenario(ctx *godog.ScenarioContext) {
 
 	// Cache behavior steps
 	ctx.Step(`^the cache is empty$`, func() error {
-		// Create a new handler to ensure empty cache
-		rssHandler := handlers.NewRSSHandlerWithClient(rssCtx.apiCtx.mockClient)
-		rssHandler.ResetCache()
-		// Re-setup router with fresh handler
+		// Clear existing cache and re-setup router
 		rssCtx.apiCtx.setupRouter()
 		return nil
 	})

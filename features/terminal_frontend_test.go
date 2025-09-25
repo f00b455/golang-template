@@ -69,7 +69,7 @@ func (t *terminalFrontendContext) iAmOnTheTerminalThemedFrontend() error {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 	t.pageContent = string(body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	return nil
 }
