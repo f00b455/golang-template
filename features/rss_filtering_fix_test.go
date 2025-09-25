@@ -1,10 +1,8 @@
 package features
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,133 +10,20 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/f00b455/golang-template/internal/handlers"
+	"github.com/f00b455/golang-template/internal/testutil"
 )
 
-// Mock RSS transport with many items for testing filtering
-type mockLargeRSSTransport struct{}
-
-// Helper function to generate RSS item XML
-func generateRSSItem(title, link, description, pubDate string) string {
-	return fmt.Sprintf(`
-		<item>
-			<title>%s</title>
-			<link>%s</link>
-			<description>%s</description>
-			<pubDate>%s</pubDate>
-		</item>`, title, link, description, pubDate)
-}
-
-// Generate regular news items (1-5)
-func generateRegularItems(builder *strings.Builder) {
-	for i := 1; i <= 5; i++ {
-		title := fmt.Sprintf("Regular News Article %d", i)
-		link := fmt.Sprintf("https://www.spiegel.de/article%d", i)
-		desc := fmt.Sprintf("Regular article number %d", i)
-		pubDate := fmt.Sprintf("Mon, 25 Sep 2025 %02d:00:00 +0200", 23-i)
-		builder.WriteString(generateRSSItem(title, link, desc, pubDate))
-	}
-}
-
-// Generate politics items (6-10)
-func generatePoliticsItems(builder *strings.Builder) {
-	for i := 6; i <= 10; i++ {
-		title := fmt.Sprintf("Politics Article %d", i)
-		link := fmt.Sprintf("https://www.spiegel.de/article%d", i)
-		desc := fmt.Sprintf("Politics news %d", i)
-		pubDate := fmt.Sprintf("Mon, 25 Sep 2025 %02d:00:00 +0200", 23-i)
-		builder.WriteString(generateRSSItem(title, link, desc, pubDate))
-	}
-}
-
-// Generate test keyword items (11-15)
-func generateTestKeywordItems(builder *strings.Builder) {
-	for i := 11; i <= 15; i++ {
-		title := fmt.Sprintf("Article with test-keyword-xyz number %d", i)
-		link := fmt.Sprintf("https://www.spiegel.de/article%d", i)
-		desc := fmt.Sprintf("Contains test-keyword-xyz in article %d", i)
-		pubDate := fmt.Sprintf("Mon, 25 Sep 2025 %02d:00:00 +0200", 23-(i%24))
-		builder.WriteString(generateRSSItem(title, link, desc, pubDate))
-	}
-}
-
-// Generate common word items (16-30)
-func generateCommonWordItems(builder *strings.Builder) {
-	for i := 16; i <= 30; i++ {
-		title := fmt.Sprintf("Article with common-word %d", i)
-		link := fmt.Sprintf("https://www.spiegel.de/article%d", i)
-		desc := fmt.Sprintf("Contains common-word in text %d", i)
-		pubDate := fmt.Sprintf("Mon, 24 Sep 2025 %02d:00:00 +0200", 23-(i%24))
-		builder.WriteString(generateRSSItem(title, link, desc, pubDate))
-	}
-}
-
-// Generate rare keyword items (31-45)
-func generateRareKeywordItems(builder *strings.Builder) {
-	for i := 31; i <= 45; i++ {
-		var title, desc string
-		if i%3 == 0 { // Only every third item has rare-keyword
-			title = fmt.Sprintf("Special article with rare-keyword %d", i)
-			desc = fmt.Sprintf("Has rare-keyword %d", i)
-		} else {
-			title = fmt.Sprintf("Standard News %d", i)
-			desc = fmt.Sprintf("Regular news item %d", i)
-		}
-		link := fmt.Sprintf("https://www.spiegel.de/article%d", i)
-		pubDate := fmt.Sprintf("Mon, 24 Sep 2025 %02d:00:00 +0200", 23-(i%24))
-		builder.WriteString(generateRSSItem(title, link, desc, pubDate))
-	}
-}
-
-// Generate latest news items (46-60)
-func generateLatestNewsItems(builder *strings.Builder) {
-	for i := 46; i <= 60; i++ {
-		title := fmt.Sprintf("Latest News %d", i)
-		link := fmt.Sprintf("https://www.spiegel.de/article%d", i)
-		desc := fmt.Sprintf("Latest article %d", i)
-		pubDate := fmt.Sprintf("Mon, 23 Sep 2025 %02d:00:00 +0200", 23-(i%24))
-		builder.WriteString(generateRSSItem(title, link, desc, pubDate))
-	}
-}
-
-func (m *mockLargeRSSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Build a mock RSS feed with 60 items
-	var builder strings.Builder
-	builder.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-	<channel>
-		<title>SPIEGEL ONLINE</title>
-		<link>https://www.spiegel.de</link>
-		<description>Deutschlands führende Nachrichtenseite</description>`)
-
-	// Generate all item categories
-	generateRegularItems(&builder)
-	generatePoliticsItems(&builder)
-	generateTestKeywordItems(&builder)
-	generateCommonWordItems(&builder)
-	generateRareKeywordItems(&builder)
-	generateLatestNewsItems(&builder)
-
-	builder.WriteString(`
-	</channel>
-</rss>`)
-
-	return &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(bytes.NewBufferString(builder.String())),
-		Header:     make(http.Header),
-		Request:    req,
-	}, nil
-}
 
 type rssFilteringContext struct {
 	apiCtx *apiMockContext
 }
 
 func (ctx *rssFilteringContext) theRSSFeedContainsHeadlinesWithVariousKeywords() error {
-	// Set up the API context with large RSS feed
+	// Set up the API context with large RSS feed using shared mock
+	mockTransport := testutil.NewLargeMockRSSTransport("test-keyword-xyz", 11, 15)
 	ctx.apiCtx = &apiMockContext{
 		mockClient: &http.Client{
-			Transport: &mockLargeRSSTransport{},
+			Transport: mockTransport,
 			Timeout:   5 * time.Second,
 		},
 	}
