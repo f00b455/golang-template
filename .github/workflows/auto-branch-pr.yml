@@ -114,12 +114,13 @@ jobs:
         id: create-pr-new
         run: |
           echo "Creating pull request for new branch..."
-          gh pr create \
-            --title "WIP: ${{ github.event.issue.title }} (#${{ github.event.issue.number }})" \
-            --body "## 🎯 Addresses #${{ github.event.issue.number }}
+
+          # Create PR body file to avoid shell escaping issues
+          cat > pr-body.md << 'EOF'
+          ## 🎯 Addresses #${{ github.event.issue.number }}
 
           ### Description
-          ${{ github.event.issue.body }}
+          See issue #${{ github.event.issue.number }} for details.
 
           ### Checklist
           - [ ] Implementation complete
@@ -141,7 +142,12 @@ jobs:
 
           ### Auto-close behavior
           - ✅ Issue will auto-close when PR is merged
-          - ✅ Branch will auto-delete after merge" \
+          - ✅ Branch will auto-delete after merge
+          EOF
+
+          gh pr create \
+            --title "WIP: ${{ github.event.issue.title }} (#${{ github.event.issue.number }})" \
+            --body-file pr-body.md \
             --draft
 
           # Try to add labels after PR creation (non-blocking)
@@ -156,13 +162,13 @@ jobs:
         id: create-pr-existing
         run: |
           echo "Creating pull request for existing branch..."
-          gh pr create \
-            --head "${{ steps.branch.outputs.name }}" \
-            --title "WIP: ${{ github.event.issue.title }} (#${{ github.event.issue.number }})" \
-            --body "## 🎯 Addresses #${{ github.event.issue.number }}
+
+          # Create PR body file to avoid shell escaping issues
+          cat > pr-body.md << 'EOF'
+          ## 🎯 Addresses #${{ github.event.issue.number }}
 
           ### Description
-          ${{ github.event.issue.body }}
+          See issue #${{ github.event.issue.number }} for details.
 
           ### Checklist
           - [ ] Implementation complete
@@ -184,7 +190,13 @@ jobs:
 
           ### Auto-close behavior
           - ✅ Issue will auto-close when PR is merged
-          - ✅ Branch will auto-delete after merge" \
+          - ✅ Branch will auto-delete after merge
+          EOF
+
+          gh pr create \
+            --head "${{ steps.branch.outputs.name }}" \
+            --title "WIP: ${{ github.event.issue.title }} (#${{ github.event.issue.number }})" \
+            --body-file pr-body.md \
             --draft
 
           # Try to add labels after PR creation (non-blocking)
