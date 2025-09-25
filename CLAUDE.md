@@ -307,3 +307,15 @@ pkg/core/
 - **BDD is mandatory for all public packages**
 - Use `gofmt` and `goimports` for consistent formatting
 - Handle all errors explicitly - no silent failures
+
+## CRITICAL: Pre-Commit Validation
+
+**ALWAYS run validation BEFORE committing any code changes:**
+
+1. **Before EVERY commit**, run: `make validate-quick` or at minimum `make test`
+2. **If tests fail**, fix them before committing
+3. **If linting fails**, fix issues before committing
+4. **NEVER commit code with failing tests or lint errors**
+5. **The CI/CD pipeline will fail if you push broken code**
+
+This is MANDATORY - the repository has pre-push hooks that enforce this locally, and you must follow the same practice to prevent CI failures.
