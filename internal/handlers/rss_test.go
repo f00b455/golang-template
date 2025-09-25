@@ -352,3 +352,189 @@ func TestRSSHandler_ResetCache(t *testing.T) {
 	assert.Nil(t, handler.cache.data)
 	assert.Empty(t, handler.multiCache.data)
 }
+
+func TestRSSHandler_GetTop5_WithFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Mock RSS response with different headline titles for filtering
+	mockRSSWithVariedTitles := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>SPIEGEL ONLINE</title>
+    <item>
+      <title><![CDATA[Politik: Neue Gesetzgebung verabschiedet]]></title>
+      <link><![CDATA[https://www.spiegel.de/1]]></link>
+      <pubDate>Mon, 24 Sep 2023 10:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[Wirtschaft: DAX erreicht neues Hoch]]></title>
+      <link><![CDATA[https://www.spiegel.de/2]]></link>
+      <pubDate>Mon, 24 Sep 2023 09:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[Politik: EU-Gipfel in Brüssel]]></title>
+      <link><![CDATA[https://www.spiegel.de/3]]></link>
+      <pubDate>Mon, 24 Sep 2023 08:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[Sport: Bayern München gewinnt]]></title>
+      <link><![CDATA[https://www.spiegel.de/4]]></link>
+      <pubDate>Mon, 24 Sep 2023 07:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[Wirtschaft: Inflation sinkt weiter]]></title>
+      <link><![CDATA[https://www.spiegel.de/5]]></link>
+      <pubDate>Mon, 24 Sep 2023 06:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>`
+
+	server := setupMockServer(mockRSSWithVariedTitles, http.StatusOK)
+	defer server.Close()
+
+	handler := NewRSSHandler()
+	handler.cfg.SpiegelRSSURL = server.URL
+	handler.ResetCache()
+
+	tests := []struct {
+		name           string
+		filter         string
+		expectedCount  int
+		expectedTitles []string
+	}{
+		{
+			name:           "Filter Politik",
+			filter:         "Politik",
+			expectedCount:  2,
+			expectedTitles: []string{"Politik: Neue Gesetzgebung verabschiedet", "Politik: EU-Gipfel in Brüssel"},
+		},
+		{
+			name:           "Filter Wirtschaft",
+			filter:         "Wirtschaft",
+			expectedCount:  2,
+			expectedTitles: []string{"Wirtschaft: DAX erreicht neues Hoch", "Wirtschaft: Inflation sinkt weiter"},
+		},
+		{
+			name:           "Filter Sport",
+			filter:         "Sport",
+			expectedCount:  1,
+			expectedTitles: []string{"Sport: Bayern München gewinnt"},
+		},
+		{
+			name:          "Filter NonExistent",
+			filter:        "Technology",
+			expectedCount: 0,
+		},
+		{
+			name:          "Empty filter returns all",
+			filter:        "",
+			expectedCount: 5,
+		},
+		{
+			name:           "Case insensitive filter",
+			filter:         "politik",
+			expectedCount:  2,
+			expectedTitles: []string{"Politik: Neue Gesetzgebung verabschiedet", "Politik: EU-Gipfel in Brüssel"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset cache before each test
+			handler.ResetCache()
+
+			url := "/rss/spiegel/top5"
+			if tt.filter != "" {
+				url += "?filter=" + tt.filter
+			}
+
+			req := httptest.NewRequest("GET", url, nil)
+			w := httptest.NewRecorder()
+
+			c, _ := gin.CreateTestContext(w)
+			c.Request = req
+
+			handler.GetTop5(c)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			var response HeadlinesResponse
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedCount, len(response.Headlines))
+
+			// Check that the expected titles are present
+			if tt.expectedTitles != nil {
+				for i, expectedTitle := range tt.expectedTitles {
+					if i < len(response.Headlines) {
+						assert.Equal(t, expectedTitle, response.Headlines[i].Title)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestFilterHeadlines(t *testing.T) {
+	handler := NewRSSHandler()
+
+	headlines := []shared.RssHeadline{
+		{Title: "Politik: Neue Entwicklung", Link: "link1", PublishedAt: "2023-09-24T10:00:00Z", Source: "SPIEGEL"},
+		{Title: "Wirtschaft: Marktanalyse", Link: "link2", PublishedAt: "2023-09-24T09:00:00Z", Source: "SPIEGEL"},
+		{Title: "Sport: Bundesliga Update", Link: "link3", PublishedAt: "2023-09-24T08:00:00Z", Source: "SPIEGEL"},
+		{Title: "Politik: Wahlkampf beginnt", Link: "link4", PublishedAt: "2023-09-24T07:00:00Z", Source: "SPIEGEL"},
+	}
+
+	tests := []struct {
+		name          string
+		keyword       string
+		expectedCount int
+		expectedFirst string
+	}{
+		{
+			name:          "Filter Politik",
+			keyword:       "Politik",
+			expectedCount: 2,
+			expectedFirst: "Politik: Neue Entwicklung",
+		},
+		{
+			name:          "Filter Sport",
+			keyword:       "Sport",
+			expectedCount: 1,
+			expectedFirst: "Sport: Bundesliga Update",
+		},
+		{
+			name:          "Case insensitive",
+			keyword:       "wirtschaft",
+			expectedCount: 1,
+			expectedFirst: "Wirtschaft: Marktanalyse",
+		},
+		{
+			name:          "No matches",
+			keyword:       "Technology",
+			expectedCount: 0,
+		},
+		{
+			name:          "Empty keyword returns all",
+			keyword:       "",
+			expectedCount: 4,
+		},
+		{
+			name:          "Partial match",
+			keyword:       "Liga",
+			expectedCount: 1,
+			expectedFirst: "Sport: Bundesliga Update",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := handler.filterHeadlines(headlines, tt.keyword)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+
+			if tt.expectedCount > 0 && tt.expectedFirst != "" {
+				assert.Equal(t, tt.expectedFirst, filtered[0].Title)
+			}
+		})
+	}
+}
