@@ -307,7 +307,105 @@ if [[ "$LABELS_CREATED" -gt 0 ]]; then
     echo -e "\n✅ Created $LABELS_CREATED new labels"
 fi
 
-# 7. Check open issues and PRs
+# 7. Check Claude Code Review setup
+echo -e "\n📋 Claude Code Review Setup:"
+echo "-----------------------------"
+
+# Check if Claude workflow exists
+if [[ -f ".github/workflows/claude-code-review.yml" ]]; then
+    echo "✅ Claude Code Review workflow exists"
+
+    # Check if CLAUDE_CODE_OAUTH_TOKEN secret exists
+    SECRET_EXISTS=$(gh secret list | grep -c "CLAUDE_CODE_OAUTH_TOKEN" || true)
+
+    if [[ "$SECRET_EXISTS" -gt 0 ]]; then
+        echo "✅ CLAUDE_CODE_OAUTH_TOKEN secret is configured"
+    else
+        echo "❌ CLAUDE_CODE_OAUTH_TOKEN secret is missing"
+        echo "   To fix: Set up OAuth token using 'claude setup-token' and add to secrets"
+        echo "   gh secret set CLAUDE_CODE_OAUTH_TOKEN"
+
+        if [[ "$FIX_MODE" == "true" ]]; then
+            echo ""
+            echo "⚠️  Cannot automatically set CLAUDE_CODE_OAUTH_TOKEN - manual setup required:"
+            echo "   1. Run 'claude setup-token' in your terminal"
+            echo "   2. Copy the generated token"
+            echo "   3. Run: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
+            echo "   4. Paste the token and press Enter"
+        fi
+    fi
+
+    # Check if workflow uses correct authentication
+    if grep -q "claude_code_oauth_token:" .github/workflows/claude-code-review.yml; then
+        echo "✅ Workflow configured to use OAuth token"
+    else
+        echo "❌ Workflow not using OAuth token authentication"
+
+        if [[ "$FIX_MODE" == "true" ]]; then
+            echo "🔧 Updating workflow to use OAuth token..."
+            sed -i.bak 's/uses: anthropics\/claude-code-action@v1$/uses: anthropics\/claude-code-action@v1\n        with:\n          claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' .github/workflows/claude-code-review.yml 2>/dev/null || \
+            sed -i '' 's/uses: anthropics\/claude-code-action@v1$/uses: anthropics\/claude-code-action@v1\n        with:\n          claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' .github/workflows/claude-code-review.yml
+            rm -f .github/workflows/claude-code-review.yml.bak
+            echo "✅ Workflow updated to use OAuth token"
+        fi
+    fi
+else
+    echo "❌ Claude Code Review workflow not found"
+    echo "   Create .github/workflows/claude-code-review.yml to enable PR reviews"
+
+    if [[ "$FIX_MODE" == "true" ]]; then
+        echo -e "\n🔧 Creating Claude Code Review workflow..."
+        mkdir -p .github/workflows
+        cat > .github/workflows/claude-code-review.yml << 'EOF'
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage
+
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+EOF
+        echo "✅ Claude Code Review workflow created!"
+        echo "   Remember to:"
+        echo "   1. Run 'claude setup-token' to get OAuth token"
+        echo "   2. Add token as secret: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
+        echo "   3. Commit and push the workflow file"
+    fi
+fi
+
+# 8. Check open issues and PRs
 echo -e "\n📋 Issues and Pull Requests:"
 echo "-----------------------------"
 
@@ -317,7 +415,7 @@ OPEN_PRS=$(gh pr list --state open --json number | jq 'length')
 echo "Open issues: $OPEN_ISSUES"
 echo "Open PRs: $OPEN_PRS"
 
-# 8. Summary
+# 9. Summary
 echo -e "\n================================================"
 if [[ "$FIX_MODE" == "false" ]]; then
     echo "ℹ️  Run with --fix flag to automatically fix issues"
