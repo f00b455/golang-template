@@ -311,51 +311,67 @@ fi
 echo -e "\n📋 Claude Code Review Setup:"
 echo "-----------------------------"
 
-# Check if Claude workflow exists
+# Check if Claude Code Review workflow exists
 if [[ -f ".github/workflows/claude-code-review.yml" ]]; then
     echo "✅ Claude Code Review workflow exists"
-
-    # Check if CLAUDE_CODE_OAUTH_TOKEN secret exists
-    SECRET_EXISTS=$(gh secret list | grep -c "CLAUDE_CODE_OAUTH_TOKEN" || true)
-
-    if [[ "$SECRET_EXISTS" -gt 0 ]]; then
-        echo "✅ CLAUDE_CODE_OAUTH_TOKEN secret is configured"
-    else
-        echo "❌ CLAUDE_CODE_OAUTH_TOKEN secret is missing"
-        echo "   To fix: Set up OAuth token using 'claude setup-token' and add to secrets"
-        echo "   gh secret set CLAUDE_CODE_OAUTH_TOKEN"
-
-        if [[ "$FIX_MODE" == "true" ]]; then
-            echo ""
-            echo "⚠️  Cannot automatically set CLAUDE_CODE_OAUTH_TOKEN - manual setup required:"
-            echo "   1. Run 'claude setup-token' in your terminal"
-            echo "   2. Copy the generated token"
-            echo "   3. Run: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
-            echo "   4. Paste the token and press Enter"
-        fi
-    fi
-
-    # Check if workflow uses correct authentication
-    if grep -q "claude_code_oauth_token:" .github/workflows/claude-code-review.yml; then
-        echo "✅ Workflow configured to use OAuth token"
-    else
-        echo "❌ Workflow not using OAuth token authentication"
-
-        if [[ "$FIX_MODE" == "true" ]]; then
-            echo "🔧 Updating workflow to use OAuth token..."
-            sed -i.bak 's/uses: anthropics\/claude-code-action@v1$/uses: anthropics\/claude-code-action@v1\n        with:\n          claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' .github/workflows/claude-code-review.yml 2>/dev/null || \
-            sed -i '' 's/uses: anthropics\/claude-code-action@v1$/uses: anthropics\/claude-code-action@v1\n        with:\n          claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' .github/workflows/claude-code-review.yml
-            rm -f .github/workflows/claude-code-review.yml.bak
-            echo "✅ Workflow updated to use OAuth token"
-        fi
-    fi
 else
     echo "❌ Claude Code Review workflow not found"
-    echo "   Create .github/workflows/claude-code-review.yml to enable PR reviews"
+fi
+
+# Check if Claude interactive workflow exists
+if [[ -f ".github/workflows/claude.yml" ]]; then
+    echo "✅ Claude interactive workflow exists"
+else
+    echo "❌ Claude interactive workflow not found"
+fi
+
+# Check if Claude iterative review workflow exists
+if [[ -f ".github/workflows/claude-iterative-review.yml" ]]; then
+    echo "✅ Claude Iterative Review workflow exists"
+else
+    echo "❌ Claude Iterative Review workflow not found"
+    echo "   This workflow automatically fixes code review suggestions with max 3 iterations"
+fi
+
+# Check if CLAUDE_CODE_OAUTH_TOKEN secret exists
+SECRET_EXISTS=$(gh secret list | grep -c "CLAUDE_CODE_OAUTH_TOKEN" || true)
+
+if [[ "$SECRET_EXISTS" -gt 0 ]]; then
+    echo "✅ CLAUDE_CODE_OAUTH_TOKEN secret is configured"
+else
+    echo "❌ CLAUDE_CODE_OAUTH_TOKEN secret is missing"
+    echo "   To fix: Set up OAuth token using 'claude setup-token' and add to secrets"
+    echo "   gh secret set CLAUDE_CODE_OAUTH_TOKEN"
 
     if [[ "$FIX_MODE" == "true" ]]; then
-        echo -e "\n🔧 Creating Claude Code Review workflow..."
-        mkdir -p .github/workflows
+        echo ""
+        echo "⚠️  Cannot automatically set CLAUDE_CODE_OAUTH_TOKEN - manual setup required:"
+        echo "   1. Run 'claude setup-token' in your terminal"
+        echo "   2. Copy the generated token"
+        echo "   3. Run: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
+        echo "   4. Paste the token and press Enter"
+    fi
+fi
+
+# Check workflow authentication configuration
+WORKFLOWS_CONFIGURED=0
+for workflow in "claude-code-review.yml" "claude.yml" "claude-iterative-review.yml"; do
+    if [[ -f ".github/workflows/$workflow" ]]; then
+        if grep -q "claude_code_oauth_token:" ".github/workflows/$workflow"; then
+            echo "✅ $workflow configured to use OAuth token"
+            ((WORKFLOWS_CONFIGURED++))
+        else
+            echo "❌ $workflow not using OAuth token authentication"
+        fi
+    fi
+done
+
+if [[ "$WORKFLOWS_CONFIGURED" -eq 0 ]] && [[ "$FIX_MODE" == "true" ]]; then
+    echo -e "\n🔧 Creating missing Claude workflows..."
+    mkdir -p .github/workflows
+
+    # Create basic Claude Code Review workflow if missing
+    if [[ ! -f ".github/workflows/claude-code-review.yml" ]]; then
         cat > .github/workflows/claude-code-review.yml << 'EOF'
 name: Claude Code Review
 
@@ -397,12 +413,13 @@ jobs:
 
           claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 EOF
-        echo "✅ Claude Code Review workflow created!"
-        echo "   Remember to:"
-        echo "   1. Run 'claude setup-token' to get OAuth token"
-        echo "   2. Add token as secret: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
-        echo "   3. Commit and push the workflow file"
+        echo "✅ Created basic Claude Code Review workflow"
     fi
+
+    echo "   Remember to:"
+    echo "   1. Run 'claude setup-token' to get OAuth token"
+    echo "   2. Add token as secret: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
+    echo "   3. Commit and push the workflow files"
 fi
 
 # 8. Check open issues and PRs
