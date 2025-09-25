@@ -21,13 +21,11 @@ type PageData struct {
 	Error     string
 }
 
-var (
-	templates *template.Template
-	cfg       *config.Config
-)
+var templates *template.Template
 
 func main() {
-	cfg = config.Load()
+	// Load config (currently unused, but may be needed for future settings)
+	_ = config.Load()
 
 	// Parse templates
 	funcMap := template.FuncMap{
