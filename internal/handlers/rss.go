@@ -157,7 +157,7 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 	}
 	h.mu.RUnlock()
 
-	headlines, err := h.fetchMultipleHeadlines(5)
+	headlines, err := h.fetchMultipleHeadlines(50)
 	if err != nil || len(headlines) == 0 {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 			Error: "Unable to fetch RSS feed",
