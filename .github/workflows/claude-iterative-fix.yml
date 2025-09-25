@@ -1,0 +1,174 @@
+name: Claude Iterative Fix
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  status: {}
+  check_run:
+    types: [completed]
+
+jobs:
+  check-and-fix:
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'status' && github.event.state == 'failure') ||
+      (github.event_name == 'check_run' && github.event.check_run.conclusion == 'failure')
+
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+      actions: read
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
+      - name: Wait for other checks
+        run: sleep 30
+
+      - name: Check if fixes are needed
+        id: check-status
+        run: |
+          # Get the PR number and commit SHA
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            # For status/check_run events, find the associated PR
+            PR_NUMBER=$(gh pr list --state open --json number,headRefOid --jq ".[] | select(.headRefOid == \"${{ github.sha }}\") | .number")
+            COMMIT_SHA="${{ github.sha }}"
+          fi
+
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_OUTPUT
+
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No associated PR found, skipping"
+            echo "SHOULD_FIX=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get status checks for the commit
+          FAILING_CHECKS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.statuses[] | select(.state == "failure" or .state == "error") | .context' | tr '\n' ' ')
+          PENDING_CHECKS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.statuses[] | select(.state == "pending") | .context' | tr '\n' ' ')
+
+          # Also check check runs
+          FAILING_CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .name' | tr '\n' ' ')
+
+          echo "Failing status checks: $FAILING_CHECKS"
+          echo "Pending status checks: $PENDING_CHECKS"
+          echo "Failing check runs: $FAILING_CHECK_RUNS"
+
+          # Skip if there are pending checks (wait for them to complete)
+          if [[ -n "$PENDING_CHECKS" ]]; then
+            echo "SHOULD_FIX=false" >> $GITHUB_OUTPUT
+            echo "Pending checks detected, will wait for completion"
+            exit 0
+          fi
+
+          # Check if any important checks are failing
+          ALL_FAILING="$FAILING_CHECKS $FAILING_CHECK_RUNS"
+          NEEDS_FIX=false
+
+          if [[ "$ALL_FAILING" == *"Lint"* ]] || [[ "$ALL_FAILING" == *"Test"* ]] || [[ "$ALL_FAILING" == *"Build"* ]]; then
+            NEEDS_FIX=true
+          fi
+
+          echo "SHOULD_FIX=$NEEDS_FIX" >> $GITHUB_OUTPUT
+          echo "FAILING_CHECKS=$ALL_FAILING" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get iteration count
+        id: get-iteration
+        if: steps.check-status.outputs.SHOULD_FIX == 'true'
+        run: |
+          PR_NUMBER="${{ steps.check-status.outputs.PR_NUMBER }}"
+
+          # Count existing Claude iteration comments
+          ITERATION_COUNT=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.body | contains("🔄 Claude Iteration")) | .body | match("🔄 Claude Iteration (\\d+)") | .captures[0].string | tonumber] | max // 0')
+          NEXT_ITERATION=$((ITERATION_COUNT + 1))
+
+          echo "ITERATION=$NEXT_ITERATION" >> $GITHUB_OUTPUT
+
+          # Stop after 3 iterations to prevent infinite loops
+          if [[ $NEXT_ITERATION -gt 3 ]]; then
+            echo "MAX_ITERATIONS_REACHED=true" >> $GITHUB_OUTPUT
+          else
+            echo "MAX_ITERATIONS_REACHED=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Claude Code to fix issues
+        if: steps.check-status.outputs.SHOULD_FIX == 'true' && steps.get-iteration.outputs.MAX_ITERATIONS_REACHED == 'false'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            🔄 Claude Iteration ${{ steps.get-iteration.outputs.ITERATION }}/3 - Auto-fixing failing checks
+
+            This PR has failing status checks that need to be resolved: ${{ steps.check-status.outputs.FAILING_CHECKS }}
+
+            Please analyze and fix the failing checks:
+
+            1. **Run the failing checks locally** to understand what's broken:
+               - If "Lint" is failing: Run `make lint` and fix linting issues
+               - If "Test" is failing: Run `make test` and fix test failures
+               - If "Build" is failing: Run `make build` and fix compilation errors
+
+            2. **Fix the root cause** of each failure:
+               - Read error messages carefully
+               - Make targeted fixes to resolve issues
+               - Ensure fixes don't break other functionality
+
+            3. **Validate fixes** by re-running the checks:
+               - Run `make lint && make test && make build` to verify all pass locally
+               - Only commit changes if all validations pass
+
+            4. **Commit and push fixes** using descriptive commit messages:
+               ```
+               git add [files]
+               git commit -m "fix: resolve [specific issue] in iteration ${{ steps.get-iteration.outputs.ITERATION }}"
+               git push
+               ```
+
+            5. **Report status** by adding a PR comment with:
+               - What was broken and why
+               - What fixes were applied
+               - Current status of all checks
+               - If this iteration resolves all issues or if more iterations are needed
+
+            **Important constraints:**
+            - Focus only on making the failing checks pass
+            - Don't make unrelated changes or improvements
+            - Preserve existing functionality and tests
+            - If you can't fix an issue, explain why and suggest manual intervention
+            - Always validate your changes before committing
+
+            Use `gh pr comment ${{ steps.check-status.outputs.PR_NUMBER }}` to report your progress and findings.
+
+          claude_args: '--allowed-tools "Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*)"'
+
+      - name: Comment on max iterations reached
+        if: steps.check-status.outputs.SHOULD_FIX == 'true' && steps.get-iteration.outputs.MAX_ITERATIONS_REACHED == 'true'
+        run: |
+          gh pr comment ${{ steps.check-status.outputs.PR_NUMBER }} --body "
+          🚫 **Claude Auto-fix Max Iterations Reached**
+
+          After 3 automated fix attempts, some checks are still failing. Manual intervention is required.
+
+          **Failing checks:** ${{ steps.check-status.outputs.FAILING_CHECKS }}
+
+          Please review the changes from previous iterations and fix any remaining issues manually.
+          You can re-trigger auto-fix by pushing new commits or closing/reopening this PR.
+          "
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

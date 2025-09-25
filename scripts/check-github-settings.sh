@@ -367,12 +367,13 @@ else
     echo "❌ Claude interactive workflow not found"
 fi
 
-# Check if Claude iterative review workflow exists
-if [[ -f ".github/workflows/claude-iterative-review.yml" ]]; then
-    echo "✅ Claude Iterative Review workflow exists"
+# Check if Claude iterative fix workflow exists
+if [[ -f ".github/workflows/claude-iterative-fix.yml" ]]; then
+    echo "✅ Claude Iterative Fix workflow exists"
+    echo "   Auto-fixes failing status checks until they pass (max 3 iterations)"
 else
-    echo "❌ Claude Iterative Review workflow not found"
-    echo "   This workflow automatically fixes code review suggestions with max 3 iterations"
+    echo "❌ Claude Iterative Fix workflow not found"
+    echo "   This workflow automatically fixes failing checks with max 3 iterations"
 fi
 
 # Check if CLAUDE_CODE_OAUTH_TOKEN secret exists
@@ -397,7 +398,7 @@ fi
 
 # Check workflow authentication configuration
 WORKFLOWS_CONFIGURED=0
-for workflow in "claude-code-review.yml" "claude.yml" "claude-iterative-review.yml"; do
+for workflow in "claude-code-review.yml" "claude.yml" "claude-iterative-fix.yml"; do
     if [[ -f ".github/workflows/$workflow" ]]; then
         if grep -q "claude_code_oauth_token:" ".github/workflows/$workflow"; then
             echo "✅ $workflow configured to use OAuth token"
