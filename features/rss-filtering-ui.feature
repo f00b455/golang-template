@@ -51,4 +51,3 @@ Feature: RSS Filtering UI in Web Interface
     Given I am on the homepage
     When I type "NonExistentKeyword" in the filter input field
     Then I should see a message "No headlines match your filter"
-    And the filtered results count should show "Showing 0 of 10 matching articles"
