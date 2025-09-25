@@ -19,6 +19,7 @@ import (
 const (
 	cacheTTL       = 5 * time.Minute
 	requestTimeout = 2 * time.Second
+	maxFetchItems  = 50 // Maximum items to fetch for filtering
 )
 
 // RSSHandler handles RSS-related requests.
@@ -157,7 +158,7 @@ func (h *RSSHandler) GetTop5(c *gin.Context) {
 	}
 	h.mu.RUnlock()
 
-	headlines, err := h.fetchMultipleHeadlines(50)
+	headlines, err := h.fetchMultipleHeadlines(maxFetchItems)
 	if err != nil || len(headlines) == 0 {
 		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
 			Error: "Unable to fetch RSS feed",
