@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal News Reader | Hacker Style RSS Feed</title>
+    <link rel="stylesheet" href="terminal.css">
+</head>
+<body>
+    <div id="terminal" class="terminal-container">
+        <!-- ASCII Art Header -->
+        <div class="ascii-header">
+            <pre class="ascii-art">
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ████████╗███████╗██████╗ ███╗   ███╗██╗███╗   ██╗ █████╗ ██╗              ║
+║  ╚══██╔══╝██╔════╝██╔══██╗████╗ ████║██║████╗  ██║██╔══██╗██║              ║
+║     ██║   █████╗  ██████╔╝██╔████╔██║██║██╔██╗ ██║███████║██║              ║
+║     ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║██║██║╚██╗██║██╔══██║██║              ║
+║     ██║   ███████╗██║  ██║██║ ╚═╝ ██║██║██║ ╚████║██║  ██║███████╗         ║
+║     ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝         ║
+║                         NEWS READER v1.0.0                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+            </pre>
+        </div>
+
+        <!-- System Info -->
+        <div class="system-info">
+            <span class="prompt">[<span id="datetime">2025-09-25 00:00:00</span>]</span>
+            <span class="status">SYSTEM: <span class="online-status">ONLINE</span></span>
+            <span class="feed-count">FEEDS: <span id="feed-count">0</span></span>
+        </div>
+
+        <!-- Command Input -->
+        <div class="command-line">
+            <span class="prompt">$</span>
+            <input type="text" id="command-input" class="command-input"
+                   placeholder="Type to filter, :help for commands..."
+                   autocomplete="off" spellcheck="false">
+            <span class="cursor blink">_</span>
+        </div>
+
+        <!-- Filter Suggestions -->
+        <div id="suggestions" class="suggestions hidden"></div>
+
+        <!-- Output Area -->
+        <div id="output" class="output-area">
+            <div class="loading">
+                <pre class="loading-animation">
+[■□□□□□□□□□] 10%  Initializing terminal...
+                </pre>
+            </div>
+        </div>
+
+        <!-- RSS Feed Container -->
+        <div id="rss-container" class="rss-container hidden">
+            <!-- RSS items will be dynamically inserted here -->
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <span class="mode">-- NORMAL --</span>
+            <span class="position" id="position">1/0</span>
+            <span class="filter-status" id="filter-status"></span>
+            <span class="shortcuts">j/k:nav | /:search | ESC:clear | Enter:open</span>
+        </div>
+    </div>
+
+    <!-- Matrix Rain Background (optional) -->
+    <canvas id="matrix-rain" class="matrix-background"></canvas>
+
+    <script src="terminal.js"></script>
+</body>
+</html>
