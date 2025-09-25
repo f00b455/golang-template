@@ -10,6 +10,7 @@ FIX_MODE=false
 NEEDS_FIX=false
 REPO_NEEDS_FIX=false
 SECURITY_NEEDS_FIX=false
+LABELS_NEEDS_FIX=false
 
 if [[ "${1:-}" == "--fix" ]]; then
     FIX_MODE=true
@@ -250,7 +251,63 @@ if [[ "$SECURITY_NEEDS_FIX" == "true" ]] && [[ "$FIX_MODE" == "true" ]]; then
     fi
 fi
 
-# 6. Check open issues and PRs
+# 6. Check and create standard labels
+echo -e "\n📋 Repository Labels:"
+echo "--------------------"
+
+# Define standard labels (name:color:description)
+STANDARD_LABELS=(
+    "bug:d73a4a:Something isn't working"
+    "enhancement:a2eeef:New feature or request"
+    "documentation:0075ca:Improvements or additions to documentation"
+    "user-story:1d76db:User story for feature development"
+    "triage:d876e3:Needs review and categorization"
+    "work-in-progress:fbca04:Pull request is still being worked on"
+    "good-first-issue:7057ff:Good for newcomers"
+    "help-wanted:008672:Extra attention is needed"
+    "wontfix:ffffff:This will not be worked on"
+    "duplicate:cfd3d7:This issue or pull request already exists"
+    "question:d876e3:Further information is requested"
+    "breaking-change:d73a4a:Introduces breaking changes"
+    "performance:f9d0c4:Performance improvements"
+    "security:ee0000:Security vulnerability or improvement"
+    "testing:bfd4f2:Related to tests and testing"
+    "ci/cd:0e8a16:Continuous Integration/Deployment"
+)
+
+# Get existing labels
+EXISTING_LABELS=$(gh label list --json name,color,description --limit 100)
+
+LABELS_CREATED=0
+LABELS_EXIST=0
+
+for label_def in "${STANDARD_LABELS[@]}"; do
+    IFS=':' read -r name color description <<< "$label_def"
+
+    # Check if label exists
+    EXISTS=$(echo "$EXISTING_LABELS" | jq -r --arg name "$name" '.[] | select(.name == $name) | .name')
+
+    if [[ -z "$EXISTS" ]]; then
+        echo "❌ Missing label: $name"
+        LABELS_NEEDS_FIX=true
+
+        if [[ "$FIX_MODE" == "true" ]]; then
+            gh label create "$name" --color "$color" --description "$description" 2>/dev/null && \
+                echo "  ✅ Created label: $name" && \
+                ((LABELS_CREATED++)) || \
+                echo "  ⚠️  Could not create label: $name"
+        fi
+    else
+        echo "✅ Label exists: $name"
+        ((LABELS_EXIST++))
+    fi
+done
+
+if [[ "$LABELS_CREATED" -gt 0 ]]; then
+    echo -e "\n✅ Created $LABELS_CREATED new labels"
+fi
+
+# 7. Check open issues and PRs
 echo -e "\n📋 Issues and Pull Requests:"
 echo "-----------------------------"
 
@@ -260,7 +317,7 @@ OPEN_PRS=$(gh pr list --state open --json number | jq 'length')
 echo "Open issues: $OPEN_ISSUES"
 echo "Open PRs: $OPEN_PRS"
 
-# 6. Summary
+# 8. Summary
 echo -e "\n================================================"
 if [[ "$FIX_MODE" == "false" ]]; then
     echo "ℹ️  Run with --fix flag to automatically fix issues"
