@@ -1,0 +1,40 @@
+{
+  "name": "@ts-template/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "next lint",
+    "start": "next start",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "test:cucumber": "node --import tsx ./node_modules/@cucumber/cucumber/bin/cucumber.js"
+  },
+  "dependencies": {
+    "@ts-template/shared": "workspace:*",
+    "next": "14.1.4",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^10.3.1",
+    "@playwright/test": "^1.42.1",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^14.2.1",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8",
+    "eslint-config-next": "14.1.4",
+    "jsdom": "^24.0.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.1",
+    "typescript": "^5",
+    "vite": "^5.4.20",
+    "vitest": "^1.4.0"
+  }
+}

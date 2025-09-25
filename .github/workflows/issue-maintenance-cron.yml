@@ -1,0 +1,188 @@
+name: Issue Maintenance Cron Job
+
+on:
+  schedule:
+    # Run every day at 6 AM UTC
+    - cron: '0 6 * * *'
+  # Also allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  check-issues:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find Issues Without Branches/PRs
+        id: find-issues
+        run: |
+          echo "🔍 Scanning all open issues for missing branches/PRs..."
+
+          # Get all open issues (any open issue should potentially get a branch/PR)
+          ISSUES=$(gh issue list \
+            --state open \
+            --json number,title,assignees,labels \
+            --jq '.[].number')
+
+          echo "Found issues to check: $ISSUES"
+
+          ISSUES_TO_PROCESS=""
+
+          for ISSUE_NUMBER in $ISSUES; do
+            echo "🔍 Checking issue #$ISSUE_NUMBER"
+
+            # Get issue details
+            ISSUE_DATA=$(gh issue view $ISSUE_NUMBER --json title,number)
+            ISSUE_TITLE=$(echo "$ISSUE_DATA" | jq -r '.title')
+
+            # Create expected branch name
+            CLEAN_TITLE=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
+            BRANCH_NAME="issue-${ISSUE_NUMBER}-${CLEAN_TITLE}"
+
+            # Check if branch exists
+            BRANCH_EXISTS=$(git ls-remote --heads origin "$BRANCH_NAME" | wc -l)
+
+            # Check if PR exists
+            PR_EXISTS=$(gh pr list --state open --search "in:title #${ISSUE_NUMBER}" --json number | jq length)
+
+            if [ "$BRANCH_EXISTS" -eq 0 ] && [ "$PR_EXISTS" -eq 0 ]; then
+              echo "✨ Issue #$ISSUE_NUMBER needs branch/PR: $BRANCH_NAME"
+              ISSUES_TO_PROCESS="$ISSUES_TO_PROCESS $ISSUE_NUMBER"
+            else
+              echo "✅ Issue #$ISSUE_NUMBER already has branch/PR"
+            fi
+          done
+
+          echo "issues=$ISSUES_TO_PROCESS" >> $GITHUB_OUTPUT
+          echo "Issues to process: $ISSUES_TO_PROCESS"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Branches and PRs for Missing Issues
+        if: steps.find-issues.outputs.issues != ''
+        run: |
+          echo "🚀 Creating branches and PRs for issues: ${{ steps.find-issues.outputs.issues }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          for ISSUE_NUMBER in ${{ steps.find-issues.outputs.issues }}; do
+            echo "🔧 Processing issue #$ISSUE_NUMBER"
+
+            # Get issue details
+            ISSUE_DATA=$(gh issue view $ISSUE_NUMBER --json title,body,assignees,author)
+            ISSUE_TITLE=$(echo "$ISSUE_DATA" | jq -r '.title')
+            ISSUE_BODY=$(echo "$ISSUE_DATA" | jq -r '.body // ""')
+            ISSUE_USER=$(echo "$ISSUE_DATA" | jq -r '.author.login')
+
+            # Create branch name
+            CLEAN_TITLE=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
+            BRANCH_NAME="issue-${ISSUE_NUMBER}-${CLEAN_TITLE}"
+
+            echo "Creating branch: $BRANCH_NAME"
+
+            # Create and checkout branch
+            git checkout main
+            git pull origin main
+            git checkout -b "$BRANCH_NAME"
+
+            # Create issue tracking file
+            mkdir -p .github/issue-tracking
+            cat > .github/issue-tracking/issue-${ISSUE_NUMBER}.md << EOF
+          # Issue #$ISSUE_NUMBER: $ISSUE_TITLE
+
+          **Issue URL**: https://github.com/${{ github.repository }}/issues/$ISSUE_NUMBER
+          **Created by**: @$ISSUE_USER
+          **Auto-processed**: $(date -u)
+
+          ## Description
+          $ISSUE_BODY
+
+          ## Work Log
+          - Branch created: $BRANCH_NAME (via cron job)
+          - [ ] Implementation
+          - [ ] Tests
+          - [ ] Documentation
+          EOF
+
+            git add .
+            git commit -m "🎯 Start work on issue #$ISSUE_NUMBER (cron)
+
+          - Create branch for: $ISSUE_TITLE
+          - Issue: https://github.com/${{ github.repository }}/issues/$ISSUE_NUMBER
+          - Auto-created by maintenance cron job
+
+          Co-authored-by: $ISSUE_USER <$ISSUE_USER@users.noreply.github.com>"
+
+            git push origin "$BRANCH_NAME"
+
+            # Create missing labels if they don't exist (ignore failures)
+            echo "Creating labels..."
+            gh label create "work-in-progress" --description "Pull request is still being worked on" --color "fbca04" || echo "Label 'work-in-progress' already exists or failed to create"
+            gh label create "auto-created" --description "Automatically created by GitHub Actions" --color "0052cc" || echo "Label 'auto-created' already exists or failed to create"
+            gh label create "issue-$ISSUE_NUMBER" --description "Related to issue #$ISSUE_NUMBER" --color "d73a4a" || echo "Label 'issue-$ISSUE_NUMBER' already exists or failed to create"
+
+            # Create PR without labels to avoid failure
+            echo "Creating PR..."
+            gh pr create \
+              --title "WIP: $ISSUE_TITLE (#$ISSUE_NUMBER)" \
+              --body "## 🎯 Addresses #$ISSUE_NUMBER
+
+          ### Description
+          $ISSUE_BODY
+
+          ### Checklist
+          - [ ] Implementation complete
+          - [ ] Tests added/updated
+          - [ ] Documentation updated
+          - [ ] Code review completed
+          - [ ] CI/CD passing
+
+          ### Auto-created
+          This PR was automatically created by the maintenance cron job.
+
+          ---
+          Closes #$ISSUE_NUMBER" \
+              --draft
+
+            # Try to add labels after PR creation (non-blocking)
+            echo "Attempting to add labels to PR..."
+            gh pr edit --add-label "work-in-progress" || echo "Could not add work-in-progress label"
+            gh pr edit --add-label "auto-created" || echo "Could not add auto-created label"
+            gh pr edit --add-label "issue-$ISSUE_NUMBER" || echo "Could not add issue-$ISSUE_NUMBER label"
+
+            # Comment on issue
+            gh issue comment $ISSUE_NUMBER --body "🤖 **Automated maintenance: Branch and PR created**
+
+          - **Branch**: \`$BRANCH_NAME\`
+          - **Pull Request**: Created as draft PR
+          - **Created by**: Maintenance cron job
+
+          You can start working on this issue:
+          \`\`\`bash
+          git fetch origin
+          git checkout $BRANCH_NAME
+          \`\`\`"
+
+            echo "✅ Completed issue #$ISSUE_NUMBER"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary Report
+        run: |
+          echo "📊 **Issue Maintenance Summary**"
+          echo "- Processed issues: ${{ steps.find-issues.outputs.issues }}"
+          echo "- Timestamp: $(date -u)"
+
+          if [ -n "${{ steps.find-issues.outputs.issues }}" ]; then
+            echo "✅ Created branches and PRs for missing issues"
+          else
+            echo "ℹ️ All qualifying issues already have branches/PRs"
+          fi

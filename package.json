@@ -1,0 +1,42 @@
+{
+  "name": "ts-pure-template",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TypeScript monorepo template with pnpm + Turborepo",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "lint:report": "node tools/analyze-violations.js",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md}\"",
+    "type-check": "turbo type-check",
+    "test": "turbo test --",
+    "test:run": "turbo test -- --run",
+    "test:e2e": "turbo test:e2e",
+    "test:cucumber": "turbo test:cucumber",
+    "clean": "turbo clean && rm -rf node_modules",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish",
+    "validate": "pnpm lint && pnpm type-check && pnpm build && pnpm test:run && pnpm test:cucumber",
+    "validate:quick": "pnpm lint && pnpm type-check && pnpm test:run",
+    "prepush": "pnpm validate",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.1",
+    "@types/node": "^20.11.30",
+    "eslint-plugin-functional": "^6.6.3",
+    "husky": "^9.1.7",
+    "prettier": "^3.2.5",
+    "ts-node": "^10.9.2",
+    "turbo": "^1.12.5",
+    "typescript": "^5.4.2"
+  },
+  "packageManager": "pnpm@8.15.4",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=8"
+  }
+}

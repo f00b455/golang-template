@@ -1,0 +1,45 @@
+{
+  "name": "@ts-template/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Colorful Hello-World CLI application",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "hello-cli": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts --format esm --dts --clean --watch --onSuccess \"node dist/index.js\"",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext .ts",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cucumber": "node --import tsx ./node_modules/@cucumber/cucumber/bin/cucumber.js --config cucumber.cjs",
+    "clean": "rm -rf dist *.log"
+  },
+  "dependencies": {
+    "@ts-template/lib-foo": "workspace:*",
+    "boxen": "^7.1.1",
+    "cac": "^6.7.14",
+    "cli-progress": "^3.12.0",
+    "gradient-string": "^2.0.2",
+    "nanospinner": "^1.1.0",
+    "picocolors": "^1.0.0"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^10.3.1",
+    "@ts-template/cucumber-shared": "workspace:*",
+    "@types/cli-progress": "^3.11.5",
+    "@types/gradient-string": "^1.1.5",
+    "@types/node": "^20",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8",
+    "tsup": "^8.0.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5",
+    "vitest": "^1.2.2"
+  }
+}

@@ -1,0 +1,189 @@
+# GitHub Actions Workflow for Wiki Test Report Publishing
+# This file documents the required changes to .github/workflows/ci.yml
+# Note: Cannot be applied directly due to permissions, but serves as implementation guide
+
+name: CI with Wiki Publishing
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+
+permissions:
+  contents: write   # Required for Wiki push
+  actions: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  test-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests with reports
+        run: |
+          pnpm test -- --reporter=junit --reporter=html --outputFile.junit=reports/junit.xml --outputFile.html=reports/index.html
+          pnpm test:cucumber -- --format json:reports/cucumber.json --format html:reports/cucumber.html
+        continue-on-error: true
+
+      - name: Generate test reports
+        if: always()
+        run: |
+          mkdir -p reports
+          # Convert JUnit XML to HTML if needed
+          if [ -f reports/junit.xml ]; then
+            npx junit-viewer --results=reports/junit.xml --save=reports/junit.html || true
+          fi
+
+          # Create summary report
+          cat > reports/index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Test Report - Run ${GITHUB_RUN_ID}</title>
+            <style>
+              body { font-family: system-ui, -apple-system, sans-serif; margin: 40px; }
+              h1 { color: #333; }
+              .info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0; }
+              .report-links { list-style: none; padding: 0; }
+              .report-links li { margin: 10px 0; }
+              .report-links a { color: #0366d6; text-decoration: none; }
+              .report-links a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <h1>Test Report</h1>
+            <div class="info">
+              <p><strong>Run ID:</strong> ${GITHUB_RUN_ID}</p>
+              <p><strong>Branch:</strong> ${GITHUB_REF_NAME}</p>
+              <p><strong>Commit:</strong> ${GITHUB_SHA}</p>
+              <p><strong>Date:</strong> $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
+            </div>
+            <h2>Available Reports</h2>
+            <ul class="report-links">
+              <li><a href="junit.html">Unit Test Report (JUnit)</a></li>
+              <li><a href="cucumber.html">BDD Test Report (Cucumber)</a></li>
+              <li><a href="coverage/index.html">Code Coverage Report</a></li>
+            </ul>
+          </body>
+          </html>
+          EOF
+
+      - name: Clone Wiki
+        if: always() && github.event_name == 'push'
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki || {
+            echo "Wiki not found or not enabled. Creating initial wiki structure..."
+            mkdir -p wiki
+            cd wiki
+            git init
+            git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+            cd ..
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish reports to Wiki
+        if: always() && github.event_name == 'push'
+        run: |
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          TARGET="wiki/reports/${BRANCH}/${GITHUB_RUN_ID}"
+          mkdir -p "$TARGET"
+
+          # Copy reports if they exist
+          if [ -d reports ]; then
+            cp -r reports/* "$TARGET/" 2>/dev/null || echo "No reports to copy"
+          else
+            echo "<html><body><h1>No reports available for this run</h1></body></html>" > "$TARGET/index.html"
+          fi
+
+          # Use the test-reporter module to generate index
+          # This would use the actual built module in production
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+
+          // Collect existing reports
+          const reportsDir = 'wiki/reports';
+          const reports = [];
+
+          if (fs.existsSync(reportsDir)) {
+            const branches = fs.readdirSync(reportsDir);
+            for (const branch of branches) {
+              const branchDir = path.join(reportsDir, branch);
+              if (fs.statSync(branchDir).isDirectory()) {
+                const runs = fs.readdirSync(branchDir);
+                for (const runId of runs) {
+                  const runDir = path.join(branchDir, runId);
+                  if (fs.statSync(runDir).isDirectory()) {
+                    reports.push({
+                      runId: runId,
+                      branch: branch,
+                      commitSha: '${GITHUB_SHA}'.substring(0, 7),
+                      timestamp: new Date().toISOString(),
+                      reportPath: 'reports/' + branch + '/' + runId + '/index.html',
+                      status: 'success'
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          // Sort by runId descending (assuming numeric)
+          reports.sort((a, b) => {
+            const aNum = parseInt(a.runId) || 0;
+            const bNum = parseInt(b.runId) || 0;
+            return bNum - aNum;
+          });
+
+          // Generate index
+          const latest = reports[0];
+          let markdown = '# Test Reports\\n\\n';
+
+          if (latest) {
+            markdown += '## Latest Run (' + latest.runId + ')\\n\\n';
+            markdown += '- **Branch:** ' + latest.branch + '\\n';
+            markdown += '- **Run:** [' + latest.runId + '](' + latest.reportPath + ')\\n';
+            markdown += '- **Commit:** ' + latest.commitSha + '\\n';
+            markdown += '- **Time:** ' + new Date().toISOString() + '\\n\\n';
+          }
+
+          markdown += '### Recent Runs\\n\\n';
+          for (const report of reports.slice(0, 20)) {
+            markdown += '- ' + report.branch + ' / ' + report.runId + ' → [Report](' + report.reportPath + ')\\n';
+          }
+
+          fs.writeFileSync('wiki/Home.md', markdown);
+          "
+
+          # Retention: Keep only last 20 runs per branch
+          for BR in $(ls wiki/reports 2>/dev/null); do
+            KEEP=20
+            ls -1dt wiki/reports/$BR/* 2>/dev/null | tail -n +$((KEEP+1)) | xargs -r rm -rf
+          done
+
+          cd wiki
+          git add .
+          git diff --staged --quiet || {
+            git commit -m "Publish test reports: ${GITHUB_REF_NAME} run ${GITHUB_RUN_ID}"
+            git push origin master || git push origin main || git push
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
