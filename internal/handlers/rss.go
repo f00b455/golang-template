@@ -22,13 +22,16 @@ const (
 	cacheTTL       = 5 * time.Minute
 	requestTimeout = 2 * time.Second
 	// maxFetchItems defines how many RSS items to fetch from the feed.
-	// We fetch 50 items to ensure filtering has enough data to search through,
-	// while keeping memory usage reasonable. This allows users to find content
-	// even if it doesn't appear in the first few items of the feed.
-	maxFetchItems = 50
+	// We fetch 250 items to ensure we have enough data for the 200 item limit,
+	// while accounting for potential filtering. This provides a buffer for
+	// filtered results while keeping memory usage manageable.
+	maxFetchItems = 250
 	// maxReturnItems defines the maximum number of items to return in the API response.
-	// This limit ensures consistent response sizes regardless of how many items match filters.
-	maxReturnItems = 5
+	// Increased to 200 to support displaying more news items in the terminal UI.
+	maxReturnItems = 200
+	// defaultReturnItems defines the default number of items when no limit is specified.
+	// Kept at 5 for backward compatibility.
+	defaultReturnItems = 5
 	// maxFilterLength is the maximum allowed length for filter parameters to prevent DoS
 	maxFilterLength = 100
 	// maxExportItems is the maximum number of items allowed in export to prevent resource exhaustion
@@ -131,11 +134,11 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 
 // GetTop5 handles GET /api/rss/spiegel/top5
 // @Summary      Get top N SPIEGEL RSS headlines
-// @Description  Fetches the top N headlines from SPIEGEL RSS feed (max 5)
+// @Description  Fetches the top N headlines from SPIEGEL RSS feed (max 200)
 // @Tags         rss
 // @Accept       json
 // @Produce      json
-// @Param        limit    query     int     false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        limit    query     int     false  "Number of headlines to fetch (1-200)" minimum(1) maximum(200) default(5)
 // @Param        filter   query     string  false  "Filter headlines by keyword"
 // @Success      200      {object}  HeadlinesResponse
 // @Failure      400      {object}  ErrorResponse
@@ -296,9 +299,12 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 
 // parseLimit extracts and validates the limit parameter from the request.
 func (h *RSSHandler) parseLimit(c *gin.Context) int {
-	limitStr := c.DefaultQuery("limit", "5")
+	limitStr := c.DefaultQuery("limit", strconv.Itoa(defaultReturnItems))
 	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > maxReturnItems {
+	if err != nil || limit < 1 {
+		return defaultReturnItems
+	}
+	if limit > maxReturnItems {
 		return maxReturnItems
 	}
 	return limit

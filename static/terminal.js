@@ -10,7 +10,10 @@
         FILTER_DELAY: 50, // 50ms debounce for real-time filtering
         THEMES: ['default', 'amber', 'matrix'],
         CACHE_KEY: 'terminal_rss_cache',
-        CACHE_DURATION: 3600000 // 1 hour
+        CACHE_DURATION: 3600000, // 1 hour
+        ITEMS_PER_PAGE: 20, // Items to display per page
+        MAX_ITEMS: 200, // Maximum items to fetch
+        VIRTUAL_SCROLL_BUFFER: 5 // Items to render outside viewport
     };
 
     // State management
@@ -22,7 +25,12 @@
         historyIndex: -1,
         currentTheme: 'default',
         isOnline: navigator.onLine,
-        filterTimer: null
+        filterTimer: null,
+        currentPage: 1,
+        totalPages: 1,
+        isLoading: false,
+        virtualScrollTop: 0,
+        visibleRange: { start: 0, end: CONFIG.ITEMS_PER_PAGE }
     };
 
     // DOM Elements
@@ -100,7 +108,7 @@
     }
 
     // RSS Feed Management
-    async function loadRSSFeed() {
+    async function loadRSSFeed(limit = CONFIG.MAX_ITEMS) {
         try {
             // Try to load from cache first if offline
             if (!state.isOnline) {
@@ -113,7 +121,8 @@
                 }
             }
 
-            const response = await fetch(CONFIG.API_ENDPOINT);
+            displayLoadingIndicator(true);
+            const response = await fetch(`${CONFIG.API_ENDPOINT}?limit=${limit}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
             const data = await response.json();
@@ -123,9 +132,11 @@
             // Cache the data
             saveToCache(state.rssItems);
 
+            updatePagination();
             renderRSSItems();
             updateFeedCount();
             displaySystemMessage(`Loaded ${state.rssItems.length} items`);
+            displayLoadingIndicator(false);
 
         } catch (error) {
             console.error('Failed to load RSS feed:', error);
@@ -134,10 +145,13 @@
             const cached = loadFromCache();
             if (cached) {
                 state.rssItems = cached;
+                updatePagination();
                 renderRSSItems();
                 displaySystemMessage('Failed to fetch. Using cached data.', 'warning');
+                displayLoadingIndicator(false);
             } else {
                 displaySystemMessage(`Error: ${error.message}`, 'error');
+                displayLoadingIndicator(false);
             }
         }
     }
