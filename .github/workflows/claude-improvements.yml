@@ -21,18 +21,25 @@ jobs:
       - name: Get PR number from workflow run context
         id: pr
         run: |
-          # Get PR numbers from the triggering workflow run
-          PR_NUMBERS=$(gh api /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/pull-requests --jq '.[].number')
+          # Get PR data from the workflow run that triggered this workflow
+          # The workflow_run event includes pull_requests data directly
+          PR_DATA=$(gh api /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }} --jq '.pull_requests')
 
-          if [[ -z "$PR_NUMBERS" ]]; then
+          if [[ "$PR_DATA" == "[]" ]] || [[ -z "$PR_DATA" ]]; then
             echo "No PR found for workflow run ID: ${{ github.event.workflow_run.id }}"
             echo "Workflow run head SHA: ${{ github.event.workflow_run.head_sha }}"
             echo "Workflow run head branch: ${{ github.event.workflow_run.head_branch }}"
             exit 1
           fi
 
-          # Take the first PR number (usually there's only one)
-          PR_NUMBER=$(echo "$PR_NUMBERS" | head -1)
+          # Extract the first PR number from the pull_requests array
+          PR_NUMBER=$(echo "$PR_DATA" | jq -r '.[0].number')
+
+          if [[ -z "$PR_NUMBER" ]] || [[ "$PR_NUMBER" == "null" ]]; then
+            echo "Failed to extract PR number from workflow run data"
+            echo "PR_DATA: $PR_DATA"
+            exit 1
+          fi
 
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "Found PR #$PR_NUMBER from workflow run context"
