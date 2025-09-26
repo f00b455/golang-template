@@ -156,7 +156,7 @@ jobs:
 
             Use `gh pr comment ${{ steps.check-status.outputs.PR_NUMBER }}` to report your progress and findings.
 
-          claude_args: '--allowed-tools "Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*)"'
+          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*),Bash(sed:*)"'
 
       - name: Comment on max iterations reached
         if: steps.check-status.outputs.SHOULD_FIX == 'true' && steps.get-iteration.outputs.MAX_ITERATIONS_REACHED == 'true'
