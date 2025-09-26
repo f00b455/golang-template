@@ -4,8 +4,7 @@
 **Created**: 2025-09-26T14:13:09Z
 **Assignee**: Unassigned
 
-## Description
-## Test Issue for CI/CD Validation
+## Description: Test Issue for CI/CD Validation
 
 This is a small test issue to verify that the CI/CD pipeline is working correctly after recent fixes.
 
