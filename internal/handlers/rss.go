@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,8 @@ const (
 	maxReturnItems = 5
 	// maxFilterLength is the maximum allowed length for filter parameters to prevent DoS
 	maxFilterLength = 100
+	// maxExportItems is the maximum number of items allowed in export to prevent resource exhaustion
+	maxExportItems = 1000
 )
 
 // RSSHandler handles RSS-related requests.
@@ -366,6 +369,198 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 	}
 
 	return filtered
+}
+
+// ExportHeadlines handles GET /api/rss/spiegel/export
+// @Summary      Export SPIEGEL RSS headlines
+// @Description  Exports RSS headlines in CSV or JSON format
+// @Tags         rss
+// @Accept       json
+// @Produce      json,csv
+// @Param        format   query     string  true   "Export format (json or csv)"
+// @Param        filter   query     string  false  "Filter headlines by keyword"
+// @Param        limit    query     int     false  "Number of headlines to export"
+// @Success      200      {object}  object
+// @Failure      400      {object}  ErrorResponse
+// @Failure      503      {object}  ErrorResponse
+// @Router       /rss/spiegel/export [get]
+func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
+	format := c.Query("format")
+	if format == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: "missing format parameter",
+		})
+		return
+	}
+
+	if format != "json" && format != "csv" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: "invalid format parameter: must be 'json' or 'csv'",
+		})
+		return
+	}
+
+	filterKeyword := c.Query("filter")
+	if err := h.validateFilter(filterKeyword); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: err.Error(),
+		})
+		return
+	}
+
+	limit := h.parseExportLimit(c)
+
+	// Get headlines from cache or fetch
+	headlines, _ := h.getCachedHeadlines()
+	if headlines == nil {
+		var err error
+		headlines, err = h.fetchAndCacheHeadlines()
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, ErrorResponse{
+				Error: "Unable to fetch RSS feed",
+			})
+			return
+		}
+	}
+
+	// Apply filter
+	if filterKeyword != "" {
+		headlines = h.filterHeadlines(headlines, filterKeyword)
+	}
+
+	// Apply limit
+	if limit > 0 && len(headlines) > limit {
+		headlines = headlines[:limit]
+	}
+
+	// Generate filename with timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	var filename string
+
+	if format == "json" {
+		filename = fmt.Sprintf("rss_export_%s.json", timestamp)
+		if filterKeyword != "" {
+			filename = fmt.Sprintf("rss_export_%s_%s.json", filterKeyword, timestamp)
+		}
+		h.exportAsJSON(c, headlines, filterKeyword, filename)
+	} else {
+		filename = fmt.Sprintf("rss_export_%s.csv", timestamp)
+		if filterKeyword != "" {
+			filename = fmt.Sprintf("rss_export_%s_%s.csv", filterKeyword, timestamp)
+		}
+		h.exportAsCSV(c, headlines, filename)
+	}
+}
+
+func (h *RSSHandler) exportAsJSON(c *gin.Context, headlines []shared.RssHeadline, filter, filename string) {
+	response := struct {
+		ExportDate    string               `json:"export_date"`
+		TotalItems    int                  `json:"total_items"`
+		FilterApplied string               `json:"filter_applied,omitempty"`
+		Headlines     []shared.RssHeadline `json:"headlines"`
+	}{
+		ExportDate: time.Now().Format(time.RFC3339),
+		TotalItems: len(headlines),
+		Headlines:  headlines,
+	}
+
+	if filter != "" {
+		response.FilterApplied = filter
+	}
+
+	// Set security headers
+	c.Header("Content-Type", "application/json")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "default-src 'none'")
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline, filename string) {
+	// Set security headers
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "default-src 'none'")
+
+	writer := csv.NewWriter(c.Writer)
+
+	// Write header
+	headers := []string{"Title", "Link", "Published_At", "Source"}
+	if err := writer.Write(headers); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to write CSV headers",
+		})
+		return
+	}
+
+	// Write data rows with sanitization
+	for _, headline := range headlines {
+		row := []string{
+			h.sanitizeCSVField(headline.Title),
+			h.sanitizeCSVField(headline.Link),
+			h.sanitizeCSVField(headline.PublishedAt),
+			h.sanitizeCSVField(headline.Source),
+		}
+		if err := writer.Write(row); err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error: "Failed to write CSV row",
+			})
+			return
+		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to flush CSV writer",
+		})
+		return
+	}
+}
+
+func (h *RSSHandler) parseExportLimit(c *gin.Context) int {
+	limitStr := c.Query("limit")
+	if limitStr == "" {
+		return maxExportItems // Default to max allowed
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 0 {
+		return maxExportItems
+	}
+
+	// Enforce maximum export limit for security
+	if limit > maxExportItems {
+		return maxExportItems
+	}
+
+	return limit
+}
+
+// sanitizeCSVField protects against CSV injection by sanitizing field values.
+// It prefixes potentially dangerous characters with a single quote to neutralize
+// formula injection attempts.
+func (h *RSSHandler) sanitizeCSVField(field string) string {
+	if field == "" {
+		return field
+	}
+
+	// Check if the field starts with a potentially dangerous character
+	// These characters can trigger formula execution in spreadsheet applications
+	dangerousChars := []rune{'=', '+', '-', '@', '\t', '\r'}
+	firstChar := rune(field[0])
+
+	for _, dangerous := range dangerousChars {
+		if firstChar == dangerous {
+			// Prefix with single quote to neutralize formula injection
+			return "'" + field
+		}
+	}
+
+	return field
 }
 
 // ResetCache resets both caches (for testing purposes).
