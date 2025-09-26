@@ -23,8 +23,8 @@ jobs:
           WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
           echo "Workflow name: $WORKFLOW_NAME"
 
-          # Extract PR number from workflow name pattern: "Title (#123)"
-          PR_NUMBER=$(echo "$WORKFLOW_NAME" | grep -oE '\(#[0-9]+\)' | grep -oE '[0-9]+' | head -1)
+          # Extract PR number from workflow name pattern: "Title #123"
+          PR_NUMBER=$(echo "$WORKFLOW_NAME" | grep -oE '#[0-9]+' | grep -oE '[0-9]+' | head -1)
 
           if [[ -z "$PR_NUMBER" ]]; then
             echo "No PR number found in workflow name: $WORKFLOW_NAME"
