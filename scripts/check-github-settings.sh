@@ -330,6 +330,7 @@ STANDARD_LABELS=(
     "pipeline:iteration-3:e99695:Pipeline iteration 3"
     "pipeline:iteration-4:e99695:Pipeline iteration 4"
     "pipeline:iteration-5:e99695:Pipeline iteration 5"
+    "pipeline:fix-attempted:fbca04:Pipeline has attempted fixes"
 )
 
 # Get existing labels

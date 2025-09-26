@@ -131,6 +131,7 @@ jobs:
           gh pr edit $PR_NUMBER --remove-label "pipeline:reviewing" 2>/dev/null || true
           gh pr edit $PR_NUMBER --remove-label "pipeline:improving" 2>/dev/null || true
           gh pr edit $PR_NUMBER --remove-label "pipeline:complete" 2>/dev/null || true
+          gh pr edit $PR_NUMBER --remove-label "pipeline:fix-attempted" 2>/dev/null || true
 
           # Determine next action based on workflow that just completed
           case "$WORKFLOW_NAME" in
@@ -151,6 +152,9 @@ jobs:
                 echo "Fix applied, re-running tests"
                 echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
                 gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+
+                # Mark that we've attempted a fix, so we know to review after tests pass
+                gh pr edit $PR_NUMBER --add-label "pipeline:fix-attempted"
               fi
               ;;
 
