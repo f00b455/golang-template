@@ -376,7 +376,8 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 // @Description  Exports RSS headlines in CSV or JSON format
 // @Tags         rss
 // @Accept       json
-// @Produce      json,csv
+// @Produce      json
+// @Produce      text/csv
 // @Param        format   query     string  true   "Export format (json or csv)"
 // @Param        filter   query     string  false  "Filter headlines by keyword"
 // @Param        limit    query     int     false  "Number of headlines to export"
