@@ -144,7 +144,7 @@ jobs:
 
             Be selective - only fix actual issues, not style preferences.
 
-          claude_args: '--max-thinking-tokens 25000 --allowed-tools "Read,Edit,MultiEdit,Bash(gh pr view:*),Bash(make test:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(go:*)"'
+          claude_args: '--allowed-tools "Read,Edit,MultiEdit,Bash(gh pr view:*),Bash(make test:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(go:*)"'
 
       - name: Comment on max improvements reached
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'true'
