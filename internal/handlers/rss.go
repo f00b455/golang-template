@@ -22,13 +22,16 @@ const (
 	cacheTTL       = 5 * time.Minute
 	requestTimeout = 2 * time.Second
 	// maxFetchItems defines how many RSS items to fetch from the feed.
-	// We fetch 50 items to ensure filtering has enough data to search through,
-	// while keeping memory usage reasonable. This allows users to find content
-	// even if it doesn't appear in the first few items of the feed.
-	maxFetchItems = 50
+	// We fetch 250 items to ensure we have enough data for the 200 item limit,
+	// while accounting for potential filtering. This provides a buffer for
+	// filtered results while keeping memory usage manageable.
+	maxFetchItems = 250
 	// maxReturnItems defines the maximum number of items to return in the API response.
-	// This limit ensures consistent response sizes regardless of how many items match filters.
-	maxReturnItems = 5
+	// Increased to 200 to support displaying more news items in the terminal UI.
+	maxReturnItems = 200
+	// defaultReturnItems defines the default number of items when no limit is specified.
+	// Kept at 5 for backward compatibility.
+	defaultReturnItems = 5
 	// maxFilterLength is the maximum allowed length for filter parameters to prevent DoS
 	maxFilterLength = 100
 	// maxExportItems is the maximum number of items allowed in export to prevent resource exhaustion
@@ -37,11 +40,12 @@ const (
 
 // RSSHandler handles RSS-related requests.
 type RSSHandler struct {
-	cfg        *config.Config
-	cache      *cacheEntry
-	multiCache *multiCacheEntry
-	mu         sync.RWMutex
-	httpClient *http.Client
+	cfg         *config.Config
+	cache       *cacheEntry
+	multiCache  *multiCacheEntry
+	mu          sync.RWMutex
+	httpClient  *http.Client
+	fetchMutex  sync.Mutex // Prevents concurrent RSS fetches
 }
 
 type cacheEntry struct {
@@ -131,11 +135,11 @@ func (h *RSSHandler) GetLatest(c *gin.Context) {
 
 // GetTop5 handles GET /api/rss/spiegel/top5
 // @Summary      Get top N SPIEGEL RSS headlines
-// @Description  Fetches the top N headlines from SPIEGEL RSS feed (max 5)
+// @Description  Fetches the top N headlines from SPIEGEL RSS feed (max 200)
 // @Tags         rss
 // @Accept       json
 // @Produce      json
-// @Param        limit    query     int     false  "Number of headlines to fetch (1-5)" minimum(1) maximum(5) default(5)
+// @Param        limit    query     int     false  "Number of headlines to fetch (1-200)" minimum(1) maximum(200) default(5)
 // @Param        filter   query     string  false  "Filter headlines by keyword"
 // @Success      200      {object}  HeadlinesResponse
 // @Failure      400      {object}  ErrorResponse
@@ -208,7 +212,7 @@ func (h *RSSHandler) fetchRSSFeed() (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", h.cfg.SpiegelRSSURL, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml")
@@ -216,17 +220,20 @@ func (h *RSSHandler) fetchRSSFeed() (string, error) {
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("request timeout after %v", requestTimeout)
+		}
+		return "", fmt.Errorf("failed to fetch RSS feed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("RSS fetch failed: %d", resp.StatusCode)
+		return "", fmt.Errorf("RSS fetch failed with status code %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	return string(body), nil
@@ -263,29 +270,41 @@ func (h *RSSHandler) parseRSSItem(itemText string) (*shared.RssHeadline, error) 
 }
 
 func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.RssHeadline {
-	var headlines []shared.RssHeadline
+	matches := h.extractRSSItems(rssText, limit)
+	return h.processRSSMatches(matches, limit)
+}
 
+// extractRSSItems finds RSS item matches in the text
+func (h *RSSHandler) extractRSSItems(rssText string, limit int) [][]string {
 	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	matches := itemRegex.FindAllStringSubmatch(rssText, limit)
+	maxMatches := limit + (limit / 5) // Add 20% buffer for invalid items
+	return itemRegex.FindAllStringSubmatch(rssText, maxMatches)
+}
 
-	for _, match := range matches {
-		if len(match) < 2 {
+// processRSSMatches converts regex matches to RssHeadline objects
+func (h *RSSHandler) processRSSMatches(matches [][]string, limit int) []shared.RssHeadline {
+	headlines := make([]shared.RssHeadline, 0, limit)
+
+	for i := 0; i < len(matches) && len(headlines) < limit; i++ {
+		if len(matches[i]) < 2 {
 			continue
 		}
 
-		headline, err := h.parseRSSItem(match[1])
-		if err != nil {
-			// Log the error but continue processing other items
-			fmt.Printf("Error parsing RSS item: %v\n", err)
-		} else if headline != nil {
+		if headline := h.parseItemSafe(matches[i][1]); headline != nil {
 			headlines = append(headlines, *headline)
-			if len(headlines) >= limit {
-				break
-			}
 		}
 	}
 
 	return headlines
+}
+
+// parseItemSafe safely parses an RSS item, returning nil on error
+func (h *RSSHandler) parseItemSafe(itemText string) *shared.RssHeadline {
+	headline, err := h.parseRSSItem(itemText)
+	if err != nil {
+		return nil
+	}
+	return headline
 }
 
 func (h *RSSHandler) cleanCDATA(text string) string {
@@ -296,9 +315,12 @@ func (h *RSSHandler) cleanCDATA(text string) string {
 
 // parseLimit extracts and validates the limit parameter from the request.
 func (h *RSSHandler) parseLimit(c *gin.Context) int {
-	limitStr := c.DefaultQuery("limit", "5")
+	limitStr := c.DefaultQuery("limit", strconv.Itoa(defaultReturnItems))
 	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > maxReturnItems {
+	if err != nil || limit < 1 {
+		return defaultReturnItems
+	}
+	if limit > maxReturnItems {
 		return maxReturnItems
 	}
 	return limit
@@ -328,14 +350,29 @@ func (h *RSSHandler) getCachedHeadlines() ([]shared.RssHeadline, int) {
 
 // fetchAndCacheHeadlines fetches headlines from RSS feed and updates the cache.
 func (h *RSSHandler) fetchAndCacheHeadlines() ([]shared.RssHeadline, error) {
+	// Prevent concurrent RSS fetches to avoid overwhelming the server
+	h.fetchMutex.Lock()
+	defer h.fetchMutex.Unlock()
+
+	// Double-check cache after acquiring lock
+	headlines, _ := h.getCachedHeadlines()
+	if headlines != nil {
+		return headlines, nil
+	}
+
+	// Fetch headlines from RSS feed
 	headlines, err := h.fetchMultipleHeadlines(maxFetchItems)
 	if err != nil || len(headlines) == 0 {
 		return nil, err
 	}
 
+	// Make a copy to avoid data races when reading from cache
+	headlinesCopy := make([]shared.RssHeadline, len(headlines))
+	copy(headlinesCopy, headlines)
+
 	h.mu.Lock()
 	h.multiCache = &multiCacheEntry{
-		data:      headlines,
+		data:      headlinesCopy,
 		timestamp: time.Now(),
 	}
 	h.mu.Unlock()
@@ -345,6 +382,11 @@ func (h *RSSHandler) fetchAndCacheHeadlines() ([]shared.RssHeadline, error) {
 
 // applyFilterAndLimit applies the filter keyword and limit to headlines.
 func (h *RSSHandler) applyFilterAndLimit(headlines []shared.RssHeadline, filter string, limit int) []shared.RssHeadline {
+	// Early return for common case
+	if filter == "" && len(headlines) <= limit {
+		return headlines
+	}
+
 	if filter != "" {
 		headlines = h.filterHeadlines(headlines, filter)
 	}
@@ -361,7 +403,12 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 	}
 
 	keyword = strings.ToLower(keyword)
-	var filtered []shared.RssHeadline
+	// Pre-allocate with estimated capacity (assuming ~30% match rate)
+	estimatedCapacity := len(headlines) / 3
+	if estimatedCapacity < 1 {
+		estimatedCapacity = 1
+	}
+	filtered := make([]shared.RssHeadline, 0, estimatedCapacity)
 
 	for _, headline := range headlines {
 		if strings.Contains(strings.ToLower(headline.Title), keyword) {
@@ -381,7 +428,7 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 // @Produce      text/csv
 // @Param        format   query     string  true   "Export format (json or csv)"
 // @Param        filter   query     string  false  "Filter headlines by keyword"
-// @Param        limit    query     int     false  "Number of headlines to export"
+// @Param        limit    query     int     false  "Number of headlines to export (1-1000)" minimum(1) maximum(1000)
 // @Success      200      {object}  object
 // @Failure      400      {object}  ErrorResponse
 // @Failure      503      {object}  ErrorResponse
@@ -431,37 +478,77 @@ func (h *RSSHandler) generateExportFilename(format, filter string) string {
 }
 
 func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
+	params, err := h.validateExportParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	headlines, err := h.prepareExportData(params.filter, params.limit)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "Unable to fetch RSS feed"})
+		return
+	}
+
+	h.performExport(c, headlines, params)
+}
+
+// exportParams holds validated export parameters
+type exportParams struct {
+	format string
+	filter string
+	limit  int
+}
+
+// validateExportParams validates all export parameters
+func (h *RSSHandler) validateExportParams(c *gin.Context) (*exportParams, error) {
 	format := c.Query("format")
 	if err := h.validateExportFormat(format); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: err.Error(),
-		})
-		return
+		return nil, err
 	}
 
-	filterKeyword := c.Query("filter")
-	if err := h.validateFilter(filterKeyword); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: err.Error(),
-		})
-		return
+	filter := c.Query("filter")
+	if err := h.validateFilter(filter); err != nil {
+		return nil, err
 	}
 
-	limit := h.parseExportLimit(c)
-
-	// Prepare data for export
-	headlines, err := h.prepareExportData(filterKeyword, limit)
+	limit, err := h.validateAndParseExportLimit(c)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
-			Error: "Unable to fetch RSS feed",
-		})
-		return
+		return nil, err
 	}
 
-	// Generate filename and export
-	filename := h.generateExportFilename(format, filterKeyword)
-	if format == "json" {
-		h.exportAsJSON(c, headlines, filterKeyword, filename)
+	return &exportParams{
+		format: format,
+		filter: filter,
+		limit:  limit,
+	}, nil
+}
+
+// validateAndParseExportLimit validates and parses the export limit
+func (h *RSSHandler) validateAndParseExportLimit(c *gin.Context) (int, error) {
+	limitStr := c.Query("limit")
+	if limitStr == "" {
+		return maxExportItems, nil
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		return maxExportItems, nil
+	}
+
+	if limit > maxExportItems {
+		return 0, fmt.Errorf("limit exceeds maximum allowed value of %d", maxExportItems)
+	}
+
+	return limit, nil
+}
+
+// performExport executes the actual export based on format
+func (h *RSSHandler) performExport(c *gin.Context, headlines []shared.RssHeadline, params *exportParams) {
+	filename := h.generateExportFilename(params.format, params.filter)
+
+	if params.format == "json" {
+		h.exportAsJSON(c, headlines, params.filter, filename)
 	} else {
 		h.exportAsCSV(c, headlines, filename)
 	}
@@ -544,24 +631,6 @@ func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline,
 	c.Data(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
 }
 
-func (h *RSSHandler) parseExportLimit(c *gin.Context) int {
-	limitStr := c.Query("limit")
-	if limitStr == "" {
-		return maxExportItems // Default to max allowed
-	}
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 0 {
-		return maxExportItems
-	}
-
-	// Enforce maximum export limit for security
-	if limit > maxExportItems {
-		return maxExportItems
-	}
-
-	return limit
-}
 
 // sanitizeCSVField protects against CSV injection by sanitizing field values.
 // It prefixes potentially dangerous characters with a single quote to neutralize

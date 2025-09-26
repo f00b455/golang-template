@@ -10,7 +10,10 @@
         FILTER_DELAY: 50, // 50ms debounce for real-time filtering
         THEMES: ['default', 'amber', 'matrix'],
         CACHE_KEY: 'terminal_rss_cache',
-        CACHE_DURATION: 3600000 // 1 hour
+        CACHE_DURATION: 3600000, // 1 hour
+        ITEMS_PER_PAGE: 20, // Items to display per page
+        MAX_ITEMS: 200, // Maximum items to fetch
+        VIRTUAL_SCROLL_BUFFER: 5 // Items to render outside viewport
     };
 
     // State management
@@ -22,7 +25,14 @@
         historyIndex: -1,
         currentTheme: 'default',
         isOnline: navigator.onLine,
-        filterTimer: null
+        filterTimer: null,
+        currentPage: 1,
+        totalPages: 1,
+        isLoading: false,
+        virtualScrollTop: 0,
+        visibleRange: { start: 0, end: CONFIG.ITEMS_PER_PAGE },
+        virtualScrollEnabled: false,
+        itemHeight: 80 // Estimated height per item in pixels
     };
 
     // DOM Elements
@@ -87,6 +97,13 @@
 
         // Auto-refresh
         setInterval(loadRSSFeed, CONFIG.REFRESH_INTERVAL);
+
+        // Handle window resize for virtual scrolling
+        window.addEventListener('resize', () => {
+            if (state.virtualScrollEnabled) {
+                renderRSSItems();
+            }
+        });
     }
 
     function initializeTerminal() {
@@ -100,7 +117,7 @@
     }
 
     // RSS Feed Management
-    async function loadRSSFeed() {
+    async function loadRSSFeed(limit = CONFIG.MAX_ITEMS) {
         try {
             // Try to load from cache first if offline
             if (!state.isOnline) {
@@ -113,19 +130,25 @@
                 }
             }
 
-            const response = await fetch(CONFIG.API_ENDPOINT);
+            displayLoadingIndicator(true, 'Connecting to server...');
+            const response = await fetch(`${CONFIG.API_ENDPOINT}?limit=${limit}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
+            displayLoadingIndicator(true, 'Processing data...');
             const data = await response.json();
             state.rssItems = processRSSData(data);
             state.filteredItems = [...state.rssItems];
 
+            displayLoadingIndicator(true, 'Caching data...');
             // Cache the data
             saveToCache(state.rssItems);
 
+            displayLoadingIndicator(true, 'Rendering items...');
+            updatePagination();
             renderRSSItems();
             updateFeedCount();
             displaySystemMessage(`Loaded ${state.rssItems.length} items`);
+            displayLoadingIndicator(false);
 
         } catch (error) {
             console.error('Failed to load RSS feed:', error);
@@ -134,10 +157,147 @@
             const cached = loadFromCache();
             if (cached) {
                 state.rssItems = cached;
+                updatePagination();
                 renderRSSItems();
                 displaySystemMessage('Failed to fetch. Using cached data.', 'warning');
+                displayLoadingIndicator(false);
             } else {
                 displaySystemMessage(`Error: ${error.message}`, 'error');
+                displayLoadingIndicator(false);
+            }
+        }
+    }
+
+    // Pagination functions
+    function updatePagination() {
+        const items = state.filteredItems.length > 0 ? state.filteredItems : state.rssItems;
+        state.totalPages = Math.ceil(items.length / CONFIG.ITEMS_PER_PAGE);
+
+        // Ensure current page is valid
+        if (state.currentPage > state.totalPages) {
+            state.currentPage = Math.max(1, state.totalPages);
+        }
+
+        // Update pagination UI controls
+        updatePaginationControls();
+    }
+
+    function updatePaginationStatus() {
+        const items = state.filteredItems.length > 0 ? state.filteredItems : state.rssItems;
+        const startItem = (state.currentPage - 1) * CONFIG.ITEMS_PER_PAGE + 1;
+        const endItem = Math.min(state.currentPage * CONFIG.ITEMS_PER_PAGE, items.length);
+
+        // Update status bar with pagination info in the format expected by BDD tests
+        if (elements.position) {
+            const statusText = items.length > CONFIG.ITEMS_PER_PAGE ?
+                `${startItem}-${endItem} of ${items.length}` :
+                `${items.length} items`;
+            elements.position.textContent = statusText;
+        }
+    }
+
+    // Add pagination controls UI
+    function updatePaginationControls() {
+        // Check if pagination controls container exists, if not create it
+        let paginationContainer = document.getElementById('pagination-controls');
+        if (!paginationContainer && elements.rssContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.id = 'pagination-controls';
+            paginationContainer.className = 'pagination-controls';
+            elements.rssContainer.parentNode.insertBefore(paginationContainer, elements.rssContainer.nextSibling);
+        }
+
+        if (!paginationContainer) return;
+
+        const items = state.filteredItems.length > 0 ? state.filteredItems : state.rssItems;
+        if (items.length <= CONFIG.ITEMS_PER_PAGE) {
+            paginationContainer.style.display = 'none';
+            return;
+        }
+
+        paginationContainer.style.display = 'flex';
+        paginationContainer.innerHTML = `
+            <button class="pagination-btn" id="page-first" ${state.currentPage === 1 ? 'disabled' : ''}>
+                &laquo; First
+            </button>
+            <button class="pagination-btn" id="page-prev" ${state.currentPage === 1 ? 'disabled' : ''}>
+                &lsaquo; Previous
+            </button>
+            <span class="pagination-info">
+                Page <input type="number" id="page-input" min="1" max="${state.totalPages}"
+                    value="${state.currentPage}" class="page-input"> of ${state.totalPages}
+            </span>
+            <button class="pagination-btn" id="page-next" ${state.currentPage === state.totalPages ? 'disabled' : ''}>
+                Next &rsaquo;
+            </button>
+            <button class="pagination-btn" id="page-last" ${state.currentPage === state.totalPages ? 'disabled' : ''}>
+                Last &raquo;
+            </button>
+        `;
+
+        // Attach event handlers
+        document.getElementById('page-first')?.addEventListener('click', () => navigateToPage(1));
+        document.getElementById('page-prev')?.addEventListener('click', () => navigateToPage(state.currentPage - 1));
+        document.getElementById('page-next')?.addEventListener('click', () => navigateToPage(state.currentPage + 1));
+        document.getElementById('page-last')?.addEventListener('click', () => navigateToPage(state.totalPages));
+
+        const pageInput = document.getElementById('page-input');
+        if (pageInput) {
+            pageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const page = parseInt(e.target.value);
+                    if (page >= 1 && page <= state.totalPages) {
+                        navigateToPage(page);
+                    }
+                }
+            });
+        }
+    }
+
+    function navigateToPage(pageNum) {
+        if (pageNum < 1 || pageNum > state.totalPages) {
+            displaySystemMessage(`Invalid page number. Valid range: 1-${state.totalPages}`, 'error');
+            return;
+        }
+
+        state.currentPage = pageNum;
+        renderRSSItems();
+        displaySystemMessage(`Navigated to page ${pageNum}`);
+    }
+
+    // Add loading indicator functions
+    function displayLoadingIndicator(show, progressText = null) {
+        if (show) {
+            state.isLoading = true;
+            let loadingDiv = document.getElementById('loading-indicator');
+
+            if (!loadingDiv) {
+                loadingDiv = document.createElement('div');
+                loadingDiv.id = 'loading-indicator';
+                loadingDiv.className = 'loading-indicator';
+                loadingDiv.innerHTML = `
+                    <div class="loading-spinner"></div>
+                    <div class="loading-text">Loading ${CONFIG.MAX_ITEMS} news items...</div>
+                    <div class="loading-progress"></div>
+                `;
+
+                if (elements.rssContainer) {
+                    elements.rssContainer.parentNode.insertBefore(loadingDiv, elements.rssContainer);
+                }
+            }
+
+            // Update progress text if provided
+            if (progressText && loadingDiv) {
+                const progressElement = loadingDiv.querySelector('.loading-progress');
+                if (progressElement) {
+                    progressElement.textContent = progressText;
+                }
+            }
+        } else {
+            state.isLoading = false;
+            const loadingDiv = document.getElementById('loading-indicator');
+            if (loadingDiv) {
+                loadingDiv.remove();
             }
         }
     }
@@ -162,13 +322,31 @@
 
     function renderRSSItems() {
         const container = elements.rssContainer;
-        container.innerHTML = '';
-
         const itemsToRender = state.filteredItems.length > 0 ?
             state.filteredItems : state.rssItems;
 
-        itemsToRender.forEach((item, index) => {
-            const article = createRSSElement(item, index);
+        // Enable virtual scrolling for large datasets
+        if (itemsToRender.length > 100) {
+            renderVirtualScrollItems(container, itemsToRender);
+        } else {
+            renderPaginatedItems(container, itemsToRender);
+        }
+
+        updatePosition();
+        updatePaginationStatus();
+    }
+
+    function renderPaginatedItems(container, items) {
+        container.innerHTML = '';
+
+        // Calculate pagination
+        const startIndex = (state.currentPage - 1) * CONFIG.ITEMS_PER_PAGE;
+        const endIndex = Math.min(startIndex + CONFIG.ITEMS_PER_PAGE, items.length);
+        const pageItems = items.slice(startIndex, endIndex);
+
+        pageItems.forEach((item, index) => {
+            const globalIndex = startIndex + index;
+            const article = createRSSElement(item, globalIndex);
             container.appendChild(article);
 
             // Stagger animation
@@ -176,8 +354,73 @@
                 article.style.opacity = '1';
             }, index * 50);
         });
+    }
 
-        updatePosition();
+    function renderVirtualScrollItems(container, items) {
+        // Clear and setup virtual scroll container
+        container.innerHTML = '';
+        container.style.position = 'relative';
+        container.style.overflowY = 'auto';
+        container.style.height = '600px'; // Fixed height for virtual scroll
+
+        // Create spacer for total height
+        const totalHeight = items.length * state.itemHeight;
+        const spacer = document.createElement('div');
+        spacer.style.height = `${totalHeight}px`;
+        spacer.style.position = 'relative';
+        container.appendChild(spacer);
+
+        // Create viewport for visible items
+        const viewport = document.createElement('div');
+        viewport.style.position = 'absolute';
+        viewport.style.top = '0';
+        viewport.style.left = '0';
+        viewport.style.right = '0';
+        spacer.appendChild(viewport);
+
+        // Render initial visible items
+        updateVirtualScroll(container, viewport, items);
+
+        // Add scroll listener for virtual scrolling
+        container.onscroll = () => {
+            requestAnimationFrame(() => {
+                updateVirtualScroll(container, viewport, items);
+            });
+        };
+
+        state.virtualScrollEnabled = true;
+    }
+
+    function updateVirtualScroll(container, viewport, items) {
+        const scrollTop = container.scrollTop;
+        const containerHeight = container.clientHeight;
+
+        // Calculate visible range with buffer
+        const startIndex = Math.max(0, Math.floor(scrollTop / state.itemHeight) - CONFIG.VIRTUAL_SCROLL_BUFFER);
+        const endIndex = Math.min(
+            items.length,
+            Math.ceil((scrollTop + containerHeight) / state.itemHeight) + CONFIG.VIRTUAL_SCROLL_BUFFER
+        );
+
+        // Only re-render if range changed significantly
+        if (Math.abs(state.visibleRange.start - startIndex) > 1 ||
+            Math.abs(state.visibleRange.end - endIndex) > 1) {
+
+            state.visibleRange = { start: startIndex, end: endIndex };
+
+            // Clear viewport and render visible items
+            viewport.innerHTML = '';
+
+            for (let i = startIndex; i < endIndex; i++) {
+                const item = items[i];
+                const article = createRSSElement(item, i);
+                article.style.position = 'absolute';
+                article.style.top = `${i * state.itemHeight}px`;
+                article.style.left = '0';
+                article.style.right = '0';
+                viewport.appendChild(article);
+            }
+        }
     }
 
     function createRSSElement(item, index) {
@@ -239,6 +482,9 @@
             elements.filterStatus.textContent = `Filter: "${query}" (${state.filteredItems.length} matches)`;
         }
 
+        // Reset to first page when filtering
+        state.currentPage = 1;
+        updatePagination();
         renderRSSItems();
     }
 
@@ -318,6 +564,19 @@
             case ':clear':
                 clearScreen();
                 break;
+            case ':page':
+                if (args.length > 0) {
+                    const pageNum = parseInt(args[0]);
+                    if (!isNaN(pageNum)) {
+                        navigateToPage(pageNum);
+                        elements.commandInput.value = '';
+                    } else {
+                        displaySystemMessage('Invalid page number. Usage: :page <number>', 'error');
+                    }
+                } else {
+                    displaySystemMessage('Usage: :page <number> - Jump to specific page', 'info');
+                }
+                break;
             case ':theme':
                 cycleTheme();
                 break;
@@ -336,6 +595,14 @@
             case ':vim':
                 enableVimMode();
                 break;
+            case ':first':
+                navigateToPage(1);
+                elements.commandInput.value = '';
+                break;
+            case ':last':
+                navigateToPage(state.totalPages);
+                elements.commandInput.value = '';
+                break;
             default:
                 displaySystemMessage(`Unknown command: ${cmd}`, 'error');
         }
@@ -353,6 +620,9 @@ Available Commands:
   :export json  - Export as JSON format
   :export csv   - Export as CSV format
   :vim          - Toggle vim keybindings
+  :page <num>   - Jump to specific page
+  :first        - Go to first page
+  :last         - Go to last page
 
 Filter Syntax:
   word      - Include items containing 'word'
@@ -367,7 +637,12 @@ Keyboard Shortcuts:
   /         - Focus search
   Enter     - Open selected item
   Escape    - Clear filter
-  Tab       - Autocomplete`;
+  Tab       - Autocomplete
+  PageDown  - Next page
+  PageUp    - Previous page
+  Home      - First page
+  End       - Last page
+  1-9       - Jump to page (when not in input)`;
 
         displaySystemMessage(helpText);
         elements.commandInput.value = '';
@@ -477,52 +752,63 @@ Statistics:
         }, EXPORT_STATUS_TIMEOUT);
     }
 
-    // Main export function (refactored to under 60 lines)
+    // Validate export parameters
+    function validateExportParams(format, filterValue) {
+        if (!['json', 'csv'].includes(format)) {
+            throw new Error('Invalid export format');
+        }
+
+        if (filterValue && filterValue.length > MAX_FILTER_LENGTH) {
+            throw new Error(`Filter too long (max ${MAX_FILTER_LENGTH} characters)`);
+        }
+    }
+
+    // Process export response
+    async function processExportResponse(response, format, itemCount, hasFilter, filterValue) {
+        if (!response.ok) {
+            const errorMsg = response.status === 503 ? 'Service temporarily unavailable' :
+                            response.status === 400 ? 'Invalid export parameters' :
+                            `Export failed (${response.status})`;
+            throw new Error(errorMsg);
+        }
+
+        const blob = await response.blob();
+        const contentDisposition = response.headers.get('Content-Disposition');
+        const defaultFilename = generateExportFilename(format, hasFilter ? filterValue : null, Date.now());
+        const filename = extractFilename(contentDisposition, defaultFilename);
+
+        triggerDownload(blob, filename);
+
+        const message = `Exported ${itemCount}${hasFilter ? ' filtered' : ''} items as ${format.toUpperCase()}`;
+        return message;
+    }
+
+    // Main export function (simplified)
     async function exportDataFormat(format) {
-        let downloadUrl = null;
-
         try {
-            // Validate format parameter
-            if (!['json', 'csv'].includes(format)) {
-                throw new Error('Invalid export format');
-            }
+            // Get filter value
+            const filterValue = elements.commandInput.value;
+            const hasFilter = filterValue && !filterValue.startsWith(':');
 
+            // Validate parameters
+            validateExportParams(format, hasFilter ? filterValue : null);
+
+            // Update UI
             updateExportStatus('Exporting...', 'success');
             elements.exportJsonBtn.disabled = true;
             elements.exportCsvBtn.disabled = true;
 
-            // Get and validate filter
-            const filterValue = elements.commandInput.value;
-            const hasFilter = filterValue && !filterValue.startsWith(':');
-
-            if (hasFilter && filterValue.length > MAX_FILTER_LENGTH) {
-                throw new Error(`Filter too long (max ${MAX_FILTER_LENGTH} characters)`);
-            }
-
+            // Build request
             const itemsToExport = hasFilter ? state.filteredItems : state.rssItems;
             const url = buildExportUrl(format, itemsToExport.length);
 
-            // Make API call with better error handling
+            // Make API call
             const response = await fetch(url.toString());
 
-            if (!response.ok) {
-                const errorMsg = response.status === 503 ? 'Service temporarily unavailable' :
-                                response.status === 400 ? 'Invalid export parameters' :
-                                `Export failed (${response.status})`;
-                throw new Error(errorMsg);
-            }
-
             // Process response
-            const blob = await response.blob();
-            const contentDisposition = response.headers.get('Content-Disposition');
-            const defaultFilename = generateExportFilename(format, hasFilter ? filterValue : null, Date.now());
-            const filename = extractFilename(contentDisposition, defaultFilename);
-
-            // Trigger download
-            triggerDownload(blob, filename);
+            const message = await processExportResponse(response, format, itemsToExport.length, hasFilter, filterValue);
 
             // Show success
-            const message = `Exported ${itemsToExport.length}${hasFilter ? ' filtered' : ''} items as ${format.toUpperCase()}`;
             updateExportStatus(message, 'success');
             displaySystemMessage(message);
 
@@ -585,6 +871,44 @@ Statistics:
     // Track export key listener to prevent stacking
     let exportKeyListener = null;
 
+    // Handle export mode
+    function handleExportMode() {
+        // Clean up any existing listener
+        if (exportKeyListener) {
+            document.removeEventListener('keydown', exportKeyListener);
+            clearTimeout(exportKeyListener.timeoutId);
+        }
+
+        // Create new listener with timeout
+        exportKeyListener = (evt) => {
+            if (evt.key === 'j' || evt.key === 'J') {
+                exportDataFormat('json');
+                displaySystemMessage('Exporting as JSON...');
+            } else if (evt.key === 'c' || evt.key === 'C') {
+                exportDataFormat('csv');
+                displaySystemMessage('Exporting as CSV...');
+            } else {
+                displaySystemMessage('Export cancelled');
+            }
+
+            document.removeEventListener('keydown', exportKeyListener);
+            clearTimeout(exportKeyListener.timeoutId);
+            exportKeyListener = null;
+        };
+
+        // Auto-cancel after 3 seconds
+        exportKeyListener.timeoutId = setTimeout(() => {
+            if (exportKeyListener) {
+                document.removeEventListener('keydown', exportKeyListener);
+                exportKeyListener = null;
+                displaySystemMessage('Export mode cancelled (timeout)');
+            }
+        }, 3000);
+
+        document.addEventListener('keydown', exportKeyListener);
+        displaySystemMessage('Export mode: Press J for JSON, C for CSV');
+    }
+
     function handleGlobalKeys(e) {
         // Skip if input is focused
         if (document.activeElement === elements.commandInput) return;
@@ -592,41 +916,7 @@ Statistics:
         // Handle Ctrl+E shortcuts for export
         if (e.ctrlKey && e.key === 'e') {
             e.preventDefault();
-
-            // Clean up any existing listener
-            if (exportKeyListener) {
-                document.removeEventListener('keydown', exportKeyListener);
-                clearTimeout(exportKeyListener.timeoutId);
-            }
-
-            // Create new listener with timeout
-            exportKeyListener = (evt) => {
-                if (evt.key === 'j' || evt.key === 'J') {
-                    exportDataFormat('json');
-                    displaySystemMessage('Exporting as JSON...');
-                } else if (evt.key === 'c' || evt.key === 'C') {
-                    exportDataFormat('csv');
-                    displaySystemMessage('Exporting as CSV...');
-                } else {
-                    displaySystemMessage('Export cancelled');
-                }
-
-                document.removeEventListener('keydown', exportKeyListener);
-                clearTimeout(exportKeyListener.timeoutId);
-                exportKeyListener = null;
-            };
-
-            // Auto-cancel after 3 seconds
-            exportKeyListener.timeoutId = setTimeout(() => {
-                if (exportKeyListener) {
-                    document.removeEventListener('keydown', exportKeyListener);
-                    exportKeyListener = null;
-                    displaySystemMessage('Export mode cancelled (timeout)');
-                }
-            }, 3000);
-
-            document.addEventListener('keydown', exportKeyListener);
-            displaySystemMessage('Export mode: Press J for JSON, C for CSV');
+            handleExportMode();
             return;
         }
 
@@ -648,6 +938,42 @@ Statistics:
             case 'Enter':
                 e.preventDefault();
                 openSelectedItem();
+                break;
+            case 'PageDown':
+                e.preventDefault();
+                if (state.currentPage < state.totalPages) {
+                    navigateToPage(state.currentPage + 1);
+                }
+                break;
+            case 'PageUp':
+                e.preventDefault();
+                if (state.currentPage > 1) {
+                    navigateToPage(state.currentPage - 1);
+                }
+                break;
+            case 'Home':
+                e.preventDefault();
+                navigateToPage(1);
+                break;
+            case 'End':
+                e.preventDefault();
+                navigateToPage(state.totalPages);
+                break;
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+                // Quick page navigation with number keys
+                e.preventDefault();
+                const pageNum = parseInt(e.key);
+                if (pageNum <= state.totalPages) {
+                    navigateToPage(pageNum);
+                }
                 break;
         }
     }
@@ -718,7 +1044,7 @@ Statistics:
 
         // Command suggestions
         if (value.startsWith(':')) {
-            const commands = [':help', ':refresh', ':clear', ':theme', ':stats', ':export', ':vim'];
+            const commands = [':help', ':refresh', ':clear', ':theme', ':stats', ':export', ':vim', ':page', ':first', ':last'];
             suggestions.push(...commands.filter(cmd => cmd.startsWith(value)));
         } else {
             // Content suggestions from RSS items

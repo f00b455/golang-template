@@ -414,3 +414,113 @@ body.theme-matrix {
 .export-status.success {
     color: var(--term-green);
 }
+
+/* Pagination Controls */
+.pagination-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin: 20px 0;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--term-green);
+    border-radius: 4px;
+}
+
+.pagination-btn {
+    padding: 8px 16px;
+    background: transparent;
+    color: var(--term-green);
+    border: 1px solid var(--term-green);
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: var(--term-green);
+    color: var(--term-bg);
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    border-color: var(--term-dim);
+    color: var(--term-dim);
+}
+
+.pagination-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--term-green);
+    font-size: 14px;
+}
+
+.page-input {
+    width: 60px;
+    padding: 4px 8px;
+    background: transparent;
+    color: var(--term-green);
+    border: 1px solid var(--term-green);
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    text-align: center;
+}
+
+.page-input:focus {
+    outline: none;
+    box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+}
+
+/* Loading Indicator */
+.loading-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid var(--term-green);
+    border-radius: 4px;
+    margin: 20px 0;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--term-dim);
+    border-top: 3px solid var(--term-green);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loading-text {
+    margin-top: 20px;
+    color: var(--term-green);
+    font-size: 14px;
+    text-align: center;
+}
+
+.loading-progress {
+    margin-top: 10px;
+    font-size: 0.9em;
+    color: var(--term-yellow);
+    min-height: 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes progress {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(250%); }
+    100% { transform: translateX(-100%); }
+}

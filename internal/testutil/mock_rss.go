@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"testing"
 )
 
 // MockRSSTransport provides a mock HTTP transport for RSS feed testing
@@ -69,4 +70,35 @@ func NewLargeMockRSSTransport(keyword string, startItem, endItem int) *MockRSSTr
 		KeywordStartItem: startItem,
 		KeywordEndItem:   endItem,
 	}
+}
+
+// MockTransport is a simple mock HTTP transport for testing
+type MockTransport struct {
+	RoundTripFunc func(req *http.Request) (*http.Response, error)
+}
+
+// RoundTrip implements the http.RoundTripper interface
+func (m *MockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return m.RoundTripFunc(req)
+}
+
+// CreateMockHTTPClient creates an HTTP client with a mock transport that returns the specified RSS content
+func CreateMockHTTPClient(_ *testing.T, rssContent string) *http.Client {
+	return &http.Client{
+		Transport: &MockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(bytes.NewBufferString(rssContent)),
+					Header:     make(http.Header),
+					Request:    req,
+				}, nil
+			},
+		},
+	}
+}
+
+// CreateReadCloser creates an io.ReadCloser from a string
+func CreateReadCloser(content string) io.ReadCloser {
+	return io.NopCloser(bytes.NewBufferString(content))
 }

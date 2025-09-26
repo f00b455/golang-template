@@ -85,8 +85,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 1000,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Number of headlines to export",
+                        "description": "Number of headlines to export (1-1000)",
                         "name": "limit",
                         "in": "query"
                     }
@@ -144,7 +146,7 @@ const docTemplate = `{
         },
         "/rss/spiegel/top5": {
             "get": {
-                "description": "Fetches the top N headlines from SPIEGEL RSS feed (max 5)",
+                "description": "Fetches the top N headlines from SPIEGEL RSS feed (max 200)",
                 "consumes": [
                     "application/json"
                 ],
@@ -157,11 +159,11 @@ const docTemplate = `{
                 "summary": "Get top N SPIEGEL RSS headlines",
                 "parameters": [
                     {
-                        "maximum": 5,
+                        "maximum": 200,
                         "minimum": 1,
                         "type": "integer",
                         "default": 5,
-                        "description": "Number of headlines to fetch (1-5)",
+                        "description": "Number of headlines to fetch (1-200)",
                         "name": "limit",
                         "in": "query"
                     },
