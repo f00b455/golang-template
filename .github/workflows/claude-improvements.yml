@@ -1,6 +1,8 @@
 name: Claude Code Improvements
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_run:
     workflows: ["Claude Iterative Fix"]
     types:
@@ -13,8 +15,9 @@ on:
 jobs:
   improve-code:
     runs-on: ubuntu-latest
-    # Only run after iterative fix succeeds, or on review comments
+    # Only run after iterative fix succeeds, on review comments, or when checks are green on PR
     if: >
+      (github.event_name == 'pull_request') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, 'improve:')) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, 'improve:'))
@@ -55,8 +58,11 @@ jobs:
       - name: Check for improvement opportunities
         id: check-improvements
         run: |
-          # Get PR number
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+          # Get PR number based on event type
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            echo "PR event - PR number: $PR_NUMBER"
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             # Extract PR number from workflow run - need to search through open PRs
             WORKFLOW_HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
             echo "Looking for PR with head SHA: $WORKFLOW_HEAD_SHA"
@@ -124,54 +130,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run Claude Code for improvements
+      - name: Report improvements needed
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'false'
-        timeout-minutes: 10  # Add timeout to prevent hanging
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            🔧 Code Improvement Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3 - Implementing review suggestions
+        run: |
+          PR_NUMBER="${{ steps.check-improvements.outputs.PR_NUMBER }}"
 
-            This PR has passing tests but code review identified improvements needed. Please implement the suggested improvements from the code review.
+          # Get the specific improvements from Claude's review
+          IMPROVEMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "claude" and .body | contains("Required Actions Before Merge"))] | .[0].body' | grep -A 20 "Required Actions Before Merge" || echo "No specific improvements found")
 
-            1. **Review the Claude code review comments** to understand what improvements are needed:
-               - Use `gh pr view ${{ steps.check-improvements.outputs.PR_NUMBER }} --json comments` to see all comments
-               - Focus on comments from Claude that contain specific improvement suggestions
-               - Pay attention to sections like "Issues & Recommendations" and "Required Actions Before Merge"
+          gh pr comment $PR_NUMBER --body "## 🔧 Code Improvements Needed (Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3)
 
-            2. **Implement the improvements** in priority order:
-               - Security issues (missing headers, validation, etc.)
-               - Performance improvements (buffering, caching, etc.)
-               - Error handling improvements
-               - Code quality improvements (refactoring, documentation)
+          The code review identified improvements that should be implemented.
 
-            3. **Validate your changes** after each improvement:
-               - Run `make lint && make test && make build` to ensure nothing breaks
-               - Only commit if all checks still pass
+          ### Status:
+          - ✅ All tests are passing
+          - ⚠️ Claude Code automatic implementation is disabled due to timeout issues
+          - 📝 Manual implementation required
 
-            4. **Commit improvements** with clear messages:
-               ```
-               git add [files]
-               git commit -m "improve: [specific improvement] based on review feedback"
-               git push
-               ```
+          ### Review Findings:
+          \`\`\`
+          $IMPROVEMENTS
+          \`\`\`
 
-            5. **Report your improvements** with a PR comment including:
-               - What improvements were implemented
-               - What suggestions were deferred and why
-               - Current code quality status
-
-            **Important constraints:**
-            - Only implement improvements that maintain backward compatibility
-            - Don't change the API interface unless specifically requested
-            - Preserve all existing tests
-            - Focus on the highest-impact improvements first
-            - If an improvement is too risky or complex, document it for manual review
-
-            Use `gh pr comment ${{ steps.check-improvements.outputs.PR_NUMBER }}` to report your progress.
-
-          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*),Bash(sed:*)"'
+          ### Next Steps:
+          Please implement the improvements manually or trigger the workflow with specific instructions.
+          "
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Comment on max improvements reached
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'true'
