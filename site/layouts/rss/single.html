@@ -17,25 +17,55 @@
     const apiURL = '{{ .Site.Params.apiURL }}';
     const container = document.getElementById('rss-feed');
 
+    // HTML escape function to prevent XSS
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Validate and sanitize URL to prevent XSS through href
+    function sanitizeUrl(url) {
+        if (!url) return '#';
+        // Only allow http, https, and relative URLs
+        const allowedProtocols = ['http:', 'https:', '/'];
+        try {
+            if (url.startsWith('/')) return url; // relative URL
+            const parsed = new URL(url);
+            if (allowedProtocols.includes(parsed.protocol)) {
+                return url;
+            }
+        } catch (e) {
+            // Invalid URL
+        }
+        return '#'; // fallback to safe value
+    }
+
     function loadRSSFeed() {
         fetch(apiURL + '/api/rss')
             .then(response => response.json())
             .then(data => {
                 if (data && data.items) {
                     let html = '<div>';
-                    html += '<p>Total items: ' + data.items.length + '</p>';
+                    html += '<p>Total items: ' + escapeHtml(String(data.items.length)) + '</p>';
                     html += '<button onclick="exportJSON()">Export as JSON</button> ';
                     html += '<button onclick="exportCSV()">Export as CSV</button>';
                     html += '<hr>';
 
                     data.items.forEach((item, index) => {
                         html += '<article>';
-                        html += '<h3>' + (index + 1) + '. <a href="' + item.link + '">' + item.title + '</a></h3>';
+                        const safeLink = sanitizeUrl(item.link);
+                        const safeTitle = escapeHtml(item.title);
+                        html += '<h3>' + escapeHtml(String(index + 1)) + '. <a href="' + escapeHtml(safeLink) + '">' + safeTitle + '</a></h3>';
                         if (item.description) {
-                            html += '<p>' + item.description + '</p>';
+                            html += '<p>' + escapeHtml(item.description) + '</p>';
                         }
                         if (item.pubDate) {
-                            html += '<p><small>Published: ' + item.pubDate + '</small></p>';
+                            html += '<p><small>Published: ' + escapeHtml(item.pubDate) + '</small></p>';
                         }
                         html += '</article><hr>';
                     });

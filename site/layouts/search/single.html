@@ -23,6 +23,17 @@
     const searchInput = document.getElementById('search-input');
     const resultsContainer = document.getElementById('search-results');
 
+    // HTML escape function to prevent XSS
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return String(unsafe)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     // Build search index from page data
     const searchIndex = [
         {{ range where .Site.RegularPages "Section" "stories" }}
@@ -48,17 +59,18 @@
         });
 
         if (results.length === 0) {
-            resultsContainer.innerHTML = '<p>No results found for: <strong>' + query + '</strong></p>';
+            resultsContainer.innerHTML = '<p>No results found for: <strong>' + escapeHtml(query) + '</strong></p>';
         } else {
-            let html = '<p>Found ' + results.length + ' result(s) for: <strong>' + query + '</strong></p>';
+            let html = '<p>Found ' + escapeHtml(results.length) + ' result(s) for: <strong>' + escapeHtml(query) + '</strong></p>';
             html += '<ul>';
             results.forEach(item => {
                 html += '<li>';
-                html += '<a href="' + item.url + '">' + item.title + '</a>';
-                html += ' - ' + item.date;
+                // URLs are already safe from Hugo's jsonify, but escape for safety
+                html += '<a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.title) + '</a>';
+                html += ' - ' + escapeHtml(item.date);
 
                 // Show snippet with highlighted search term
-                const contentSnippet = getSnippet(item.content, lowerQuery);
+                const contentSnippet = getSnippet(item.content, query);
                 if (contentSnippet) {
                     html += '<br><small>' + contentSnippet + '</small>';
                 }
@@ -70,18 +82,23 @@
     }
 
     function getSnippet(content, query) {
-        const index = content.toLowerCase().indexOf(query);
+        const index = content.toLowerCase().indexOf(query.toLowerCase());
         if (index === -1) return '';
 
         const start = Math.max(0, index - 50);
         const end = Math.min(content.length, index + query.length + 50);
         let snippet = content.substring(start, end);
 
+        // Escape HTML first to prevent XSS
+        snippet = escapeHtml(snippet);
+
         if (start > 0) snippet = '...' + snippet;
         if (end < content.length) snippet = snippet + '...';
 
-        // Highlight the search term
-        const regex = new RegExp(query, 'gi');
+        // Highlight the search term safely after escaping
+        // Create a safe regex pattern by escaping special regex characters
+        const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(safeQuery, 'gi');
         snippet = snippet.replace(regex, '<strong>$&</strong>');
 
         return snippet;
