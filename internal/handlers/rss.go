@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -385,18 +386,55 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 // @Failure      400      {object}  ErrorResponse
 // @Failure      503      {object}  ErrorResponse
 // @Router       /rss/spiegel/export [get]
-func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
-	format := c.Query("format")
+// validateExportFormat checks if the export format is valid
+func (h *RSSHandler) validateExportFormat(format string) error {
 	if format == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "missing format parameter",
-		})
-		return
+		return fmt.Errorf("missing format parameter")
+	}
+	if format != "json" && format != "csv" {
+		return fmt.Errorf("invalid format parameter: must be 'json' or 'csv'")
+	}
+	return nil
+}
+
+// prepareExportData fetches and filters headlines for export
+func (h *RSSHandler) prepareExportData(filterKeyword string, limit int) ([]shared.RssHeadline, error) {
+	headlines, _ := h.getCachedHeadlines()
+	if headlines == nil {
+		var err error
+		headlines, err = h.fetchAndCacheHeadlines()
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if format != "json" && format != "csv" {
+	// Apply filter
+	if filterKeyword != "" {
+		headlines = h.filterHeadlines(headlines, filterKeyword)
+	}
+
+	// Apply limit
+	if limit > 0 && len(headlines) > limit {
+		headlines = headlines[:limit]
+	}
+
+	return headlines, nil
+}
+
+// generateExportFilename creates a filename for export with optional filter
+func (h *RSSHandler) generateExportFilename(format, filter string) string {
+	timestamp := time.Now().Format("20060102_150405")
+	if filter != "" {
+		return fmt.Sprintf("rss_export_%s_%s.%s", filter, timestamp, format)
+	}
+	return fmt.Sprintf("rss_export_%s.%s", timestamp, format)
+}
+
+func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
+	format := c.Query("format")
+	if err := h.validateExportFormat(format); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "invalid format parameter: must be 'json' or 'csv'",
+			Error: err.Error(),
 		})
 		return
 	}
@@ -411,44 +449,20 @@ func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
 
 	limit := h.parseExportLimit(c)
 
-	// Get headlines from cache or fetch
-	headlines, _ := h.getCachedHeadlines()
-	if headlines == nil {
-		var err error
-		headlines, err = h.fetchAndCacheHeadlines()
-		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, ErrorResponse{
-				Error: "Unable to fetch RSS feed",
-			})
-			return
-		}
+	// Prepare data for export
+	headlines, err := h.prepareExportData(filterKeyword, limit)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
+			Error: "Unable to fetch RSS feed",
+		})
+		return
 	}
 
-	// Apply filter
-	if filterKeyword != "" {
-		headlines = h.filterHeadlines(headlines, filterKeyword)
-	}
-
-	// Apply limit
-	if limit > 0 && len(headlines) > limit {
-		headlines = headlines[:limit]
-	}
-
-	// Generate filename with timestamp
-	timestamp := time.Now().Format("20060102_150405")
-	var filename string
-
+	// Generate filename and export
+	filename := h.generateExportFilename(format, filterKeyword)
 	if format == "json" {
-		filename = fmt.Sprintf("rss_export_%s.json", timestamp)
-		if filterKeyword != "" {
-			filename = fmt.Sprintf("rss_export_%s_%s.json", filterKeyword, timestamp)
-		}
 		h.exportAsJSON(c, headlines, filterKeyword, filename)
 	} else {
-		filename = fmt.Sprintf("rss_export_%s.csv", timestamp)
-		if filterKeyword != "" {
-			filename = fmt.Sprintf("rss_export_%s_%s.csv", filterKeyword, timestamp)
-		}
 		h.exportAsCSV(c, headlines, filename)
 	}
 }
@@ -479,14 +493,9 @@ func (h *RSSHandler) exportAsJSON(c *gin.Context, headlines []shared.RssHeadline
 }
 
 func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline, filename string) {
-	// Set security headers
-	c.Header("Content-Type", "text/csv; charset=utf-8")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("X-Frame-Options", "DENY")
-	c.Header("Content-Security-Policy", "default-src 'none'")
-
-	writer := csv.NewWriter(c.Writer)
+	// Build CSV content in memory to calculate Content-Length
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 
 	// Write header
 	headers := []string{"Title", "Link", "Published_At", "Source"}
@@ -514,12 +523,25 @@ func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline,
 	}
 
 	writer.Flush()
+
+	// Check for any errors in CSV writer
 	if err := writer.Error(); err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: "Failed to flush CSV writer",
+			Error: "Failed to generate CSV",
 		})
 		return
 	}
+
+	// Set headers including Content-Length
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "default-src 'none'")
+
+	// Write the response
+	c.Data(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
 }
 
 func (h *RSSHandler) parseExportLimit(c *gin.Context) int {

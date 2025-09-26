@@ -50,6 +50,63 @@
                 }
             }
         },
+        "/rss/spiegel/export": {
+            "get": {
+                "description": "Exports RSS headlines in CSV or JSON format",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/csv"
+                ],
+                "tags": [
+                    "rss"
+                ],
+                "summary": "Export SPIEGEL RSS headlines",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Export format (json or csv)",
+                        "name": "format",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter headlines by keyword",
+                        "name": "filter",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of headlines to export",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/rss/spiegel/latest": {
             "get": {
                 "description": "Fetches the most recent headline from SPIEGEL RSS feed",
