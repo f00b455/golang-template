@@ -86,14 +86,14 @@ jobs:
             exit 0
           fi
 
-          # Look for Claude's review comments with improvement suggestions
-          REVIEW_COMMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "claude" and (.body | contains("review") or contains("Review") or contains("improvement") or contains("suggest")))] | length')
+          # Simply check if there's a Claude review - let Claude Code decide if improvements are needed
+          REVIEW_COMMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "claude")] | length')
 
           if [[ $REVIEW_COMMENTS -gt 0 ]]; then
-            echo "Found Claude review with improvement suggestions"
+            echo "Found Claude review - will let Claude Code analyze it"
             echo "SHOULD_IMPROVE=true" >> $GITHUB_OUTPUT
           else
-            echo "No improvement suggestions found"
+            echo "No Claude review found"
             echo "SHOULD_IMPROVE=false" >> $GITHUB_OUTPUT
           fi
         env:
@@ -133,16 +133,20 @@ jobs:
           prompt: |
             🔧 Improvement Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3
 
-            The Claude Code Review action has completed and left a review on PR #${{ steps.check-improvements.outputs.PR_NUMBER }}.
+            Read and analyze the latest code review on PR #${{ steps.check-improvements.outputs.PR_NUMBER }}.
 
-            Your task:
-            1. Read the latest review from user "claude" using: gh pr view ${{ steps.check-improvements.outputs.PR_NUMBER }} --json comments --jq '.comments[] | select(.author.login == "claude") | .body' | tail -1
-            2. Identify specific improvements or issues mentioned in the review
-            3. Implement ONLY the high-priority fixes (security, bugs, critical issues)
-            4. Run tests: make test
-            5. Commit: git add -A && git commit -m "improve: implement code review suggestions (iteration ${{ steps.get-improvement.outputs.ITERATION }})" && git push
+            Steps:
+            1. Read the latest review: gh pr view ${{ steps.check-improvements.outputs.PR_NUMBER }} --json comments --jq '.comments[] | select(.author.login == "claude") | .body' | tail -1
+            2. Analyze if the review requests changes:
+               - If it says "Request Changes" or indicates missing functionality, implement the fixes
+               - If it says "Approved" or only has minor suggestions, exit without changes
+            3. If changes are needed:
+               - Implement the specific issues mentioned (missing implementations, bugs, security issues)
+               - Run tests: make test
+               - Commit: git add -A && git commit -m "improve: implement review feedback (iteration ${{ steps.get-improvement.outputs.ITERATION }})" && git push
+            4. If no changes needed, exit successfully without commits
 
-            Be selective - only fix actual issues, not style preferences.
+            Use your judgment - only make changes if the review explicitly requests them.
 
           claude_args: '--allowed-tools "Read,Edit,MultiEdit,Bash(gh pr view:*),Bash(make test:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(go:*)"'
 
