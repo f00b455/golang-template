@@ -52,8 +52,13 @@ jobs:
         go build -o bin/cli-tool ./cmd/cli
         go build -o bin/web-server ./cmd/web
 
-    - name: Run unit tests
-      run: go test -v -race -coverprofile=coverage.out ./...
+    - name: Run unit tests with coverage
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Check test coverage threshold
+      run: |
+        chmod +x scripts/check-coverage.sh
+        ./scripts/check-coverage.sh 95.0 coverage.out
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
