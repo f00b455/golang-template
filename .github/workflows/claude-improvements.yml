@@ -98,6 +98,11 @@ jobs:
             5. Test your changes: make test
             6. Commit your changes to THIS PR branch: git add -A && git commit -m "improve: implement code review feedback for PR #${{ steps.pr.outputs.PR_NUMBER }}" && git push
 
-            IMPORTANT: You are working on PR #${{ steps.pr.outputs.PR_NUMBER }} only. Do not review, comment on, or modify any other PRs.
+            CRITICAL RESTRICTIONS:
+            - You are working EXCLUSIVELY on PR #${{ steps.pr.outputs.PR_NUMBER }}
+            - DO NOT post any reviews or comments to ANY PR
+            - DO NOT use gh pr comment, gh pr review, or any PR comment/review commands
+            - ONLY modify files in the current branch using Read, Edit, Write, MultiEdit tools
+            - Your job is to implement changes, not to provide reviews or feedback
 
-          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr view:${{ steps.pr.outputs.PR_NUMBER }}),Bash(make:*),Bash(git:*),Bash(go:*)" --disable-pr-comments --disable-reviews'
+          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr view:${{ steps.pr.outputs.PR_NUMBER }}),Bash(make:*),Bash(git:*),Bash(go:*)"'
