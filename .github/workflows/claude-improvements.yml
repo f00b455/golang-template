@@ -51,35 +51,31 @@ jobs:
 
       - name: Post automation status comment
         run: |
-          gh pr comment ${{ steps.pr.outputs.PR_NUMBER }} --body "<div align=\"center\">
+          gh pr comment ${{ steps.pr.outputs.PR_NUMBER }} --body "
+          # 🤖⚡ **CLAUDE CODE AUTOMATION RUNNING** ⚡🤖
 
-          # <img src=\"https://github.com/images/icons/emoji/unicode/1f916.png\" width=\"20\" height=\"20\" style=\"animation: blink 1s infinite;\"> **Claude Code Automation Running** <img src=\"https://github.com/images/icons/emoji/unicode/1f916.png\" width=\"20\" height=\"20\" style=\"animation: blink 1s infinite;\">
+          ```
+          ╔══════════════════════════════════════════════╗
+          ║  🔴🟡🟢 ACTIVE AUTOMATION IN PROGRESS 🟢🟡🔴  ║
+          ║              ┌─────────────────┐              ║
+          ║              │ ⚡ PROCESSING ⚡ │              ║
+          ║              └─────────────────┘              ║
+          ╚══════════════════════════════════════════════╝
+          ```
 
-          <style>
-          @keyframes blink {
-            0%, 50% { opacity: 1; }
-            51%, 100% { opacity: 0.3; }
-          }
-          .status-indicator {
-            animation: blink 1s infinite;
-            font-size: 1.2em;
-          }
-          </style>
-
-          <div class=\"status-indicator\">🔄 **ACTIVE AUTOMATION IN PROGRESS** 🔄</div>
-
-          The automated improvements workflow is actively implementing review feedback.
-
-          **Status**: <span class=\"status-indicator\">⚡ Running</span>
-          **Workflow**: [🔗 View Live Progress](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          **Started**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-          *This comment will be updated when the automation completes.*
+          🔄 **Status**: **RUNNING** ⚡⚡⚡
+          📊 **Workflow**: [🔗 View Live Progress](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          ⏰ **Started**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          🎯 **Action**: Implementing review feedback automatically
 
           ---
-          *🤖 Automated by Claude Code Pipeline*
 
-          </div>"
+          > 🤖 **Automated by Claude Code Pipeline**
+          > *This comment will be updated when automation completes*
+
+          ```
+          [████████████████████████████████████████] 🚀 DEPLOYING FIXES...
+          ```"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
