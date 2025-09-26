@@ -269,7 +269,8 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 	var headlines []shared.RssHeadline
 
 	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	matches := itemRegex.FindAllStringSubmatch(rssText, limit)
+	// Find all matches in the RSS text (use -1 to get all matches)
+	matches := itemRegex.FindAllStringSubmatch(rssText, -1)
 
 	for _, match := range matches {
 		if len(match) < 2 {

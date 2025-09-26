@@ -71,7 +71,8 @@ func (ctx *top200TestContext) iHaveARunningAPIServer() error {
 	// Setup RSS routes (matching the actual handler setup)
 	api := ctx.router.Group("/api")
 	rss := api.Group("/rss")
-	rssHandler := handlers.NewRSSHandler()
+	// Use the handler with custom HTTP client that will use http.DefaultClient
+	rssHandler := handlers.NewRSSHandlerWithClient(http.DefaultClient)
 
 	// Clear any existing cache to ensure tests are isolated
 	rssHandler.ResetCache()
