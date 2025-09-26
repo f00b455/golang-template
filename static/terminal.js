@@ -659,52 +659,63 @@ Statistics:
         }, EXPORT_STATUS_TIMEOUT);
     }
 
-    // Main export function (refactored to under 60 lines)
+    // Validate export parameters
+    function validateExportParams(format, filterValue) {
+        if (!['json', 'csv'].includes(format)) {
+            throw new Error('Invalid export format');
+        }
+
+        if (filterValue && filterValue.length > MAX_FILTER_LENGTH) {
+            throw new Error(`Filter too long (max ${MAX_FILTER_LENGTH} characters)`);
+        }
+    }
+
+    // Process export response
+    async function processExportResponse(response, format, itemCount, hasFilter, filterValue) {
+        if (!response.ok) {
+            const errorMsg = response.status === 503 ? 'Service temporarily unavailable' :
+                            response.status === 400 ? 'Invalid export parameters' :
+                            `Export failed (${response.status})`;
+            throw new Error(errorMsg);
+        }
+
+        const blob = await response.blob();
+        const contentDisposition = response.headers.get('Content-Disposition');
+        const defaultFilename = generateExportFilename(format, hasFilter ? filterValue : null, Date.now());
+        const filename = extractFilename(contentDisposition, defaultFilename);
+
+        triggerDownload(blob, filename);
+
+        const message = `Exported ${itemCount}${hasFilter ? ' filtered' : ''} items as ${format.toUpperCase()}`;
+        return message;
+    }
+
+    // Main export function (simplified)
     async function exportDataFormat(format) {
-        let downloadUrl = null;
-
         try {
-            // Validate format parameter
-            if (!['json', 'csv'].includes(format)) {
-                throw new Error('Invalid export format');
-            }
+            // Get filter value
+            const filterValue = elements.commandInput.value;
+            const hasFilter = filterValue && !filterValue.startsWith(':');
 
+            // Validate parameters
+            validateExportParams(format, hasFilter ? filterValue : null);
+
+            // Update UI
             updateExportStatus('Exporting...', 'success');
             elements.exportJsonBtn.disabled = true;
             elements.exportCsvBtn.disabled = true;
 
-            // Get and validate filter
-            const filterValue = elements.commandInput.value;
-            const hasFilter = filterValue && !filterValue.startsWith(':');
-
-            if (hasFilter && filterValue.length > MAX_FILTER_LENGTH) {
-                throw new Error(`Filter too long (max ${MAX_FILTER_LENGTH} characters)`);
-            }
-
+            // Build request
             const itemsToExport = hasFilter ? state.filteredItems : state.rssItems;
             const url = buildExportUrl(format, itemsToExport.length);
 
-            // Make API call with better error handling
+            // Make API call
             const response = await fetch(url.toString());
 
-            if (!response.ok) {
-                const errorMsg = response.status === 503 ? 'Service temporarily unavailable' :
-                                response.status === 400 ? 'Invalid export parameters' :
-                                `Export failed (${response.status})`;
-                throw new Error(errorMsg);
-            }
-
             // Process response
-            const blob = await response.blob();
-            const contentDisposition = response.headers.get('Content-Disposition');
-            const defaultFilename = generateExportFilename(format, hasFilter ? filterValue : null, Date.now());
-            const filename = extractFilename(contentDisposition, defaultFilename);
-
-            // Trigger download
-            triggerDownload(blob, filename);
+            const message = await processExportResponse(response, format, itemsToExport.length, hasFilter, filterValue);
 
             // Show success
-            const message = `Exported ${itemsToExport.length}${hasFilter ? ' filtered' : ''} items as ${format.toUpperCase()}`;
             updateExportStatus(message, 'success');
             displaySystemMessage(message);
 
@@ -767,6 +778,44 @@ Statistics:
     // Track export key listener to prevent stacking
     let exportKeyListener = null;
 
+    // Handle export mode
+    function handleExportMode() {
+        // Clean up any existing listener
+        if (exportKeyListener) {
+            document.removeEventListener('keydown', exportKeyListener);
+            clearTimeout(exportKeyListener.timeoutId);
+        }
+
+        // Create new listener with timeout
+        exportKeyListener = (evt) => {
+            if (evt.key === 'j' || evt.key === 'J') {
+                exportDataFormat('json');
+                displaySystemMessage('Exporting as JSON...');
+            } else if (evt.key === 'c' || evt.key === 'C') {
+                exportDataFormat('csv');
+                displaySystemMessage('Exporting as CSV...');
+            } else {
+                displaySystemMessage('Export cancelled');
+            }
+
+            document.removeEventListener('keydown', exportKeyListener);
+            clearTimeout(exportKeyListener.timeoutId);
+            exportKeyListener = null;
+        };
+
+        // Auto-cancel after 3 seconds
+        exportKeyListener.timeoutId = setTimeout(() => {
+            if (exportKeyListener) {
+                document.removeEventListener('keydown', exportKeyListener);
+                exportKeyListener = null;
+                displaySystemMessage('Export mode cancelled (timeout)');
+            }
+        }, 3000);
+
+        document.addEventListener('keydown', exportKeyListener);
+        displaySystemMessage('Export mode: Press J for JSON, C for CSV');
+    }
+
     function handleGlobalKeys(e) {
         // Skip if input is focused
         if (document.activeElement === elements.commandInput) return;
@@ -774,41 +823,7 @@ Statistics:
         // Handle Ctrl+E shortcuts for export
         if (e.ctrlKey && e.key === 'e') {
             e.preventDefault();
-
-            // Clean up any existing listener
-            if (exportKeyListener) {
-                document.removeEventListener('keydown', exportKeyListener);
-                clearTimeout(exportKeyListener.timeoutId);
-            }
-
-            // Create new listener with timeout
-            exportKeyListener = (evt) => {
-                if (evt.key === 'j' || evt.key === 'J') {
-                    exportDataFormat('json');
-                    displaySystemMessage('Exporting as JSON...');
-                } else if (evt.key === 'c' || evt.key === 'C') {
-                    exportDataFormat('csv');
-                    displaySystemMessage('Exporting as CSV...');
-                } else {
-                    displaySystemMessage('Export cancelled');
-                }
-
-                document.removeEventListener('keydown', exportKeyListener);
-                clearTimeout(exportKeyListener.timeoutId);
-                exportKeyListener = null;
-            };
-
-            // Auto-cancel after 3 seconds
-            exportKeyListener.timeoutId = setTimeout(() => {
-                if (exportKeyListener) {
-                    document.removeEventListener('keydown', exportKeyListener);
-                    exportKeyListener = null;
-                    displaySystemMessage('Export mode cancelled (timeout)');
-                }
-            }, 3000);
-
-            document.addEventListener('keydown', exportKeyListener);
-            displaySystemMessage('Export mode: Press J for JSON, C for CSV');
+            handleExportMode();
             return;
         }
 

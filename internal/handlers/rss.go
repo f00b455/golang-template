@@ -211,7 +211,7 @@ func (h *RSSHandler) fetchRSSFeed() (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", h.cfg.SpiegelRSSURL, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml")
@@ -219,17 +219,20 @@ func (h *RSSHandler) fetchRSSFeed() (string, error) {
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("request timeout after %v", requestTimeout)
+		}
+		return "", fmt.Errorf("failed to fetch RSS feed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("RSS fetch failed: %d", resp.StatusCode)
+		return "", fmt.Errorf("RSS fetch failed with status code %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	return string(body), nil
@@ -279,9 +282,10 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 
 		headline, err := h.parseRSSItem(match[1])
 		if err != nil {
-			// Log the error but continue processing other items
-			fmt.Printf("Error parsing RSS item: %v\n", err)
-		} else if headline != nil {
+			// Skip invalid items and continue processing
+			continue
+		}
+		if headline != nil {
 			headlines = append(headlines, *headline)
 			if len(headlines) >= limit {
 				break
@@ -388,7 +392,7 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 // @Produce      text/csv
 // @Param        format   query     string  true   "Export format (json or csv)"
 // @Param        filter   query     string  false  "Filter headlines by keyword"
-// @Param        limit    query     int     false  "Number of headlines to export"
+// @Param        limit    query     int     false  "Number of headlines to export (1-1000)" minimum(1) maximum(1000)
 // @Success      200      {object}  object
 // @Failure      400      {object}  ErrorResponse
 // @Failure      503      {object}  ErrorResponse
@@ -455,6 +459,15 @@ func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
 	}
 
 	limit := h.parseExportLimit(c)
+	// Additional validation for export limit
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if val, err := strconv.Atoi(limitStr); err == nil && val > maxExportItems {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error: fmt.Sprintf("limit exceeds maximum allowed value of %d", maxExportItems),
+			})
+			return
+		}
+	}
 
 	// Prepare data for export
 	headlines, err := h.prepareExportData(filterKeyword, limit)
@@ -558,7 +571,7 @@ func (h *RSSHandler) parseExportLimit(c *gin.Context) int {
 	}
 
 	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 0 {
+	if err != nil || limit < 1 {
 		return maxExportItems
 	}
 

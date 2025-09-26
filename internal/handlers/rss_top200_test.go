@@ -235,6 +235,117 @@ func TestCachingWith200Items(t *testing.T) {
 		"Cached response should be identical")
 }
 
+// TestExportLimitValidation tests that export limit is properly validated
+func TestExportLimitValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		limit          string
+		expectedStatus int
+		description    string
+	}{
+		{
+			name:           "Valid limit within range",
+			limit:          "500",
+			expectedStatus: http.StatusOK,
+			description:    "Should accept limit within allowed range",
+		},
+		{
+			name:           "Maximum allowed limit",
+			limit:          "1000",
+			expectedStatus: http.StatusOK,
+			description:    "Should accept maximum limit of 1000",
+		},
+		{
+			name:           "Exceeds maximum limit",
+			limit:          "1001",
+			expectedStatus: http.StatusBadRequest,
+			description:    "Should reject limit exceeding 1000",
+		},
+		{
+			name:           "Negative limit",
+			limit:          "-1",
+			expectedStatus: http.StatusOK,
+			description:    "Should use default for invalid negative limit",
+		},
+		{
+			name:           "Zero limit",
+			limit:          "0",
+			expectedStatus: http.StatusOK,
+			description:    "Should use default for zero limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := testutil.CreateMockHTTPClient(t, generateLargeRSSFeed(250))
+			handler := NewRSSHandlerWithClient(mockClient)
+			router := gin.New()
+			router.GET("/api/rss/spiegel/export", handler.ExportHeadlines)
+
+			url := fmt.Sprintf("/api/rss/spiegel/export?format=json&limit=%s", tt.limit)
+			req, err := http.NewRequest("GET", url, nil)
+			require.NoError(t, err)
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
+
+			if w.Code == http.StatusBadRequest {
+				var response ErrorResponse
+				err = json.Unmarshal(w.Body.Bytes(), &response)
+				require.NoError(t, err)
+				assert.Contains(t, response.Error, "limit exceeds maximum")
+			}
+		})
+	}
+}
+
+// TestConcurrentRequests tests that the handler properly handles concurrent requests
+func TestConcurrentRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockClient := testutil.CreateMockHTTPClient(t, generateLargeRSSFeed(200))
+	handler := NewRSSHandlerWithClient(mockClient)
+	router := gin.New()
+	router.GET("/api/rss/spiegel/top5", handler.GetTop5)
+
+	// Number of concurrent requests
+	numRequests := 20
+	results := make(chan int, numRequests)
+	errors := make(chan error, numRequests)
+
+	// Launch concurrent requests
+	for i := 0; i < numRequests; i++ {
+		go func(id int) {
+			req, err := http.NewRequest("GET", "/api/rss/spiegel/top5?limit=50", nil)
+			if err != nil {
+				errors <- err
+				return
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			results <- w.Code
+		}(i)
+	}
+
+	// Collect results
+	for i := 0; i < numRequests; i++ {
+		select {
+		case code := <-results:
+			assert.Equal(t, http.StatusOK, code,
+				"All concurrent requests should succeed")
+		case err := <-errors:
+			t.Fatalf("Error in concurrent request: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("Timeout waiting for concurrent requests")
+		}
+	}
+}
+
 // Helper function to generate a large RSS feed
 func generateLargeRSSFeed(itemCount int) string {
 	var items strings.Builder
