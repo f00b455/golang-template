@@ -317,6 +317,19 @@ STANDARD_LABELS=(
     "high-priority:d73a4a:High priority issue that needs immediate attention"
     "critical:b60205:Critical issue requiring immediate attention"
     "pipeline:0052cc:Related to CI/CD pipeline workflows"
+    "pipeline:testing:0366d6:Pipeline is running tests"
+    "pipeline:fixing:fbca04:Pipeline is fixing failures"
+    "pipeline:reviewing:0052cc:Pipeline is running code review"
+    "pipeline:improving:a2eeef:Pipeline is implementing improvements"
+    "pipeline:complete:0e8a16:Pipeline completed successfully"
+    "pipeline:stop:d73a4a:Stop pipeline execution"
+    "pipeline:continue:28a745:Continue pipeline execution"
+    "pipeline:max-iterations-reached:ff6600:Maximum pipeline iterations reached"
+    "pipeline:iteration-1:e99695:Pipeline iteration 1"
+    "pipeline:iteration-2:e99695:Pipeline iteration 2"
+    "pipeline:iteration-3:e99695:Pipeline iteration 3"
+    "pipeline:iteration-4:e99695:Pipeline iteration 4"
+    "pipeline:iteration-5:e99695:Pipeline iteration 5"
 )
 
 # Get existing labels

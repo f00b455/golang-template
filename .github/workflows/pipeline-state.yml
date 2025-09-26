@@ -1,0 +1,157 @@
+name: Pipeline State Manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull Request number'
+        required: true
+        type: string
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - reset
+          - stop
+          - continue
+          - status
+
+jobs:
+  manage-state:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Manage Pipeline State
+        run: |
+          PR_NUMBER="${{ inputs.pr_number }}"
+          ACTION="${{ inputs.action }}"
+
+          case "$ACTION" in
+            "reset")
+              echo "Resetting pipeline state for PR #$PR_NUMBER"
+
+              # Remove all pipeline labels
+              for label in $(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:"); do
+                gh pr edit $PR_NUMBER --remove-label "$label"
+              done
+
+              # Add fresh start label
+              gh pr edit $PR_NUMBER --add-label "pipeline:iteration-1"
+              gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+
+              gh pr comment $PR_NUMBER --body "## 🔄 Pipeline Reset
+
+              The pipeline state has been reset. The automated improvement cycle will restart from the beginning.
+
+              - Iteration counter reset to 1
+              - All pipeline state labels cleared
+              - Ready to begin new cycle
+
+              The pipeline will now:
+              1. Run tests, lint, and build
+              2. Fix any failures
+              3. Run code review
+              4. Implement improvements
+              5. Repeat until complete or max iterations reached"
+              ;;
+
+            "stop")
+              echo "Stopping pipeline for PR #$PR_NUMBER"
+
+              # Add stop label
+              gh pr edit $PR_NUMBER --add-label "pipeline:stop"
+
+              # Remove active state labels
+              gh pr edit $PR_NUMBER --remove-label "pipeline:testing" 2>/dev/null || true
+              gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
+              gh pr edit $PR_NUMBER --remove-label "pipeline:reviewing" 2>/dev/null || true
+              gh pr edit $PR_NUMBER --remove-label "pipeline:improving" 2>/dev/null || true
+
+              gh pr comment $PR_NUMBER --body "## ⛔ Pipeline Stopped
+
+              The automated pipeline has been manually stopped.
+
+              - No further automated actions will be taken
+              - Current state preserved
+              - Remove the \`pipeline:stop\` label to resume
+
+              To restart the pipeline:
+              - Remove \`pipeline:stop\` label
+              - Trigger with new commit or use workflow dispatch"
+              ;;
+
+            "continue")
+              echo "Continuing pipeline for PR #$PR_NUMBER"
+
+              # Remove stop label
+              gh pr edit $PR_NUMBER --remove-label "pipeline:stop" 2>/dev/null || true
+              gh pr edit $PR_NUMBER --remove-label "pipeline:max-iterations-reached" 2>/dev/null || true
+
+              gh pr comment $PR_NUMBER --body "## ▶️ Pipeline Resumed
+
+              The automated pipeline has been resumed.
+
+              - Stop signal removed
+              - Pipeline will continue from current state
+              - Automation re-enabled
+
+              The pipeline orchestrator will determine the next action based on the current state."
+              ;;
+
+            "status")
+              echo "Getting pipeline status for PR #$PR_NUMBER"
+
+              # Get all pipeline labels
+              LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" | paste -sd ", " - || echo "none")
+
+              # Get iteration count
+              ITERATION=$(echo "$LABELS" | grep -oP 'pipeline:iteration-\K\d+' || echo "0")
+
+              # Determine current state
+              STATE="unknown"
+              if echo "$LABELS" | grep -q "pipeline:stop"; then
+                STATE="stopped"
+              elif echo "$LABELS" | grep -q "pipeline:complete"; then
+                STATE="complete"
+              elif echo "$LABELS" | grep -q "pipeline:testing"; then
+                STATE="testing"
+              elif echo "$LABELS" | grep -q "pipeline:fixing"; then
+                STATE="fixing"
+              elif echo "$LABELS" | grep -q "pipeline:reviewing"; then
+                STATE="reviewing"
+              elif echo "$LABELS" | grep -q "pipeline:improving"; then
+                STATE="improving"
+              fi
+
+              gh pr comment $PR_NUMBER --body "## 📊 Pipeline Status Report
+
+              ### Current State
+              - **PR**: #$PR_NUMBER
+              - **Status**: $STATE
+              - **Iteration**: $ITERATION / 5
+              - **Labels**: $LABELS
+
+              ### Pipeline Flow
+              \`\`\`
+              Test/Lint/Build → Fix (if needed) → Review → Improve → [Repeat]
+                     ↑                                                    ↓
+                     └────────────────────────────────────────────────┘
+              \`\`\`
+
+              ### Available Actions
+              - Add label \`pipeline:stop\` to pause
+              - Add label \`pipeline:continue\` to resume
+              - Use workflow dispatch to reset or manage state"
+              ;;
+
+            *)
+              echo "Unknown action: $ACTION"
+              exit 1
+              ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

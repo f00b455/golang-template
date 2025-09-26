@@ -1,0 +1,268 @@
+name: Pipeline Orchestrator
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+  workflow_run:
+    workflows:
+      - "Go CI/CD"
+      - "Claude Code Review"
+      - "Claude Code Improvements"
+      - "Claude Iterative Fix"
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull Request number to orchestrate'
+        required: true
+        type: string
+
+env:
+  MAX_ITERATIONS: 5
+  COOLDOWN_SECONDS: 30
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: write
+      checks: read
+      statuses: read
+      id-token: write
+
+    steps:
+      - name: Determine PR Number
+        id: pr-number
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "PR_NUMBER=${{ inputs.pr_number }}" >> $GITHUB_OUTPUT
+          else
+            # For workflow_run events, get PR from the workflow run
+            PR_DATA=$(gh api /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }} --jq '.pull_requests')
+            if [[ "$PR_DATA" != "[]" ]]; then
+              PR_NUMBER=$(echo "$PR_DATA" | jq -r '.[0].number')
+              echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+            else
+              echo "No PR associated with workflow run"
+              exit 0
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Pipeline State
+        id: state
+        run: |
+          PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
+
+          # Get current labels
+          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" || echo "")
+
+          # Check for stop signal
+          if echo "$LABELS" | grep -q "pipeline:stop"; then
+            echo "Pipeline stopped by user"
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get iteration count from labels
+          ITERATION=$(echo "$LABELS" | grep -oP 'pipeline:iteration-\K\d+' || echo "0")
+          if [[ -z "$ITERATION" ]]; then
+            ITERATION=0
+          fi
+
+          echo "CURRENT_ITERATION=$ITERATION" >> $GITHUB_OUTPUT
+          echo "Current iteration: $ITERATION"
+
+          # Check max iterations
+          if [[ $ITERATION -ge ${{ env.MAX_ITERATIONS }} ]]; then
+            echo "Max iterations reached (${{ env.MAX_ITERATIONS }})"
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
+
+            # Add max iterations reached label
+            gh pr edit $PR_NUMBER --add-label "pipeline:max-iterations-reached"
+
+            # Post comment
+            gh pr comment $PR_NUMBER --body "## 🔄 Pipeline Status: Max Iterations Reached
+
+            The pipeline has completed **$ITERATION** iterations, reaching the maximum limit.
+
+            ### Next Steps:
+            - Review the changes made by the automated pipeline
+            - Add label \`pipeline:continue\` to run more iterations
+            - Add label \`pipeline:stop\` to stop the pipeline
+            - Manually merge if satisfied with the current state"
+
+            exit 0
+          fi
+
+          echo "SHOULD_CONTINUE=true" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine Next Action
+        id: next-action
+        if: steps.state.outputs.SHOULD_CONTINUE == 'true'
+        run: |
+          PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
+          WORKFLOW_NAME="${{ github.event.workflow_run.workflow_name || 'Initial' }}"
+          WORKFLOW_CONCLUSION="${{ github.event.workflow_run.conclusion || 'none' }}"
+
+          echo "Triggered by: $WORKFLOW_NAME with conclusion: $WORKFLOW_CONCLUSION"
+
+          # Remove all pipeline state labels
+          gh pr edit $PR_NUMBER --remove-label "pipeline:testing" 2>/dev/null || true
+          gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
+          gh pr edit $PR_NUMBER --remove-label "pipeline:reviewing" 2>/dev/null || true
+          gh pr edit $PR_NUMBER --remove-label "pipeline:improving" 2>/dev/null || true
+          gh pr edit $PR_NUMBER --remove-label "pipeline:complete" 2>/dev/null || true
+
+          # Determine next action based on workflow that just completed
+          case "$WORKFLOW_NAME" in
+            "Go CI/CD")
+              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
+                echo "Tests passed, triggering code review"
+                echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
+                gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
+              elif [[ "$WORKFLOW_CONCLUSION" == "failure" ]]; then
+                echo "Tests failed, triggering iterative fix"
+                echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
+                gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
+              fi
+              ;;
+
+            "Claude Iterative Fix")
+              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
+                echo "Fix applied, re-running tests"
+                echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+                gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+              fi
+              ;;
+
+            "Claude Code Review")
+              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
+                # Check if review had suggestions (look for recent review comments)
+                RECENT_REVIEW=$(gh pr view $PR_NUMBER --json comments --jq '.comments[-1].body' 2>/dev/null || echo "")
+
+                if echo "$RECENT_REVIEW" | grep -q "Issues\|Recommendations\|Fix\|Should"; then
+                  echo "Review has suggestions, triggering improvements"
+                  echo "NEXT_ACTION=improve" >> $GITHUB_OUTPUT
+                  gh pr edit $PR_NUMBER --add-label "pipeline:improving"
+                else
+                  echo "Review complete with no major issues"
+                  echo "NEXT_ACTION=complete" >> $GITHUB_OUTPUT
+                  gh pr edit $PR_NUMBER --add-label "pipeline:complete"
+                fi
+              fi
+              ;;
+
+            "Claude Code Improvements")
+              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
+                echo "Improvements applied, re-running tests"
+                echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+                gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+
+                # Increment iteration counter
+                CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
+                NEXT_ITERATION=$((CURRENT_ITERATION + 1))
+
+                # Remove old iteration label
+                gh pr edit $PR_NUMBER --remove-label "pipeline:iteration-$CURRENT_ITERATION" 2>/dev/null || true
+
+                # Add new iteration label
+                gh pr edit $PR_NUMBER --add-label "pipeline:iteration-$NEXT_ITERATION"
+              fi
+              ;;
+
+            "Initial"|"")
+              # Initial trigger or manual dispatch
+              echo "Starting pipeline with tests"
+              echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+              gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+              gh pr edit $PR_NUMBER --add-label "pipeline:iteration-1"
+              ;;
+
+            *)
+              echo "Unknown workflow: $WORKFLOW_NAME"
+              echo "NEXT_ACTION=none" >> $GITHUB_OUTPUT
+              ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add Cooldown
+        if: steps.next-action.outputs.NEXT_ACTION != 'none' && steps.next-action.outputs.NEXT_ACTION != 'complete'
+        run: |
+          echo "Adding ${{ env.COOLDOWN_SECONDS }} second cooldown before next action..."
+          sleep ${{ env.COOLDOWN_SECONDS }}
+
+      - name: Trigger Next Action
+        if: steps.state.outputs.SHOULD_CONTINUE == 'true'
+        run: |
+          NEXT_ACTION="${{ steps.next-action.outputs.NEXT_ACTION }}"
+          PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
+
+          case "$NEXT_ACTION" in
+            "test")
+              echo "Triggering test workflow..."
+              # The Go CI/CD workflow will trigger automatically on push
+              # Just add a comment for visibility
+              gh pr comment $PR_NUMBER --body "🔄 **Pipeline Status**: Running tests (iteration ${{ steps.state.outputs.CURRENT_ITERATION }})"
+              ;;
+
+            "fix")
+              echo "Triggering iterative fix workflow..."
+              # The iterative fix workflow will trigger on check failures
+              gh pr comment $PR_NUMBER --body "🔧 **Pipeline Status**: Applying automated fixes"
+              ;;
+
+            "review")
+              echo "Triggering code review..."
+              # Code review triggers on PR synchronize, add a comment to track
+              gh pr comment $PR_NUMBER --body "📝 **Pipeline Status**: Running code review"
+              ;;
+
+            "improve")
+              echo "Improvements will trigger after review completes"
+              gh pr comment $PR_NUMBER --body "✨ **Pipeline Status**: Implementing review feedback"
+              ;;
+
+            "complete")
+              gh pr comment $PR_NUMBER --body "✅ **Pipeline Complete**: All checks passed after ${{ steps.state.outputs.CURRENT_ITERATION }} iteration(s)
+
+              The automated pipeline has successfully completed. The PR is ready for final human review and merge."
+              ;;
+
+            *)
+              echo "No action to trigger"
+              ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post Status Summary
+        if: always()
+        run: |
+          PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
+          ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
+
+          # Get all pipeline labels
+          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" | paste -sd ", " - || echo "none")
+
+          echo "## Pipeline Orchestrator Summary"
+          echo "- PR: #$PR_NUMBER"
+          echo "- Iteration: $ITERATION / ${{ env.MAX_ITERATIONS }}"
+          echo "- Labels: $LABELS"
+          echo "- Next Action: ${{ steps.next-action.outputs.NEXT_ACTION || 'none' }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

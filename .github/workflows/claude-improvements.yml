@@ -129,3 +129,21 @@ jobs:
             - Your job is to implement changes, not to provide reviews or feedback
 
           claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(git:*),Bash(make:*),Bash(go:*)"'
+
+      - name: Signal Pipeline Orchestrator
+        if: always()
+        run: |
+          # Add a label to signal the orchestrator that improvements are complete
+          PR_NUMBER="${{ steps.pr.outputs.PR_NUMBER }}"
+
+          if [[ "${{ job.status }}" == "success" ]]; then
+            gh pr comment $PR_NUMBER --body "✅ **Improvements Applied**: Code review feedback has been implemented and committed.
+
+            The pipeline orchestrator will now re-run tests to verify the changes."
+          else
+            gh pr comment $PR_NUMBER --body "⚠️ **Improvements Failed**: Unable to apply code review feedback automatically.
+
+            Manual intervention may be required. Check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
