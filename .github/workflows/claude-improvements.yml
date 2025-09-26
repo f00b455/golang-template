@@ -1,10 +1,8 @@
 name: Claude Code Improvements
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
   workflow_run:
-    workflows: ["Claude Iterative Fix"]
+    workflows: ["Claude Code Review"]
     types:
       - completed
   pull_request_review_comment:
@@ -15,9 +13,8 @@ on:
 jobs:
   improve-code:
     runs-on: ubuntu-latest
-    # Only run after iterative fix succeeds, on review comments, or when checks are green on PR
+    # Only run after Claude Code Review completes successfully or on manual trigger
     if: >
-      (github.event_name == 'pull_request') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, 'improve:')) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, 'improve:'))
@@ -59,13 +56,10 @@ jobs:
         id: check-improvements
         run: |
           # Get PR number based on event type
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-            echo "PR event - PR number: $PR_NUMBER"
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            # Extract PR number from workflow run - need to search through open PRs
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            # Extract PR number from workflow run - Claude Code Review runs on PRs
             WORKFLOW_HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
-            echo "Looking for PR with head SHA: $WORKFLOW_HEAD_SHA"
+            echo "Claude Code Review completed for SHA: $WORKFLOW_HEAD_SHA"
             PR_NUMBER=$(gh pr list --state open --json number,headRefOid --jq ".[] | select(.headRefOid == \"$WORKFLOW_HEAD_SHA\") | .number" || echo "")
             echo "Found PR number: $PR_NUMBER"
           elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
@@ -93,7 +87,7 @@ jobs:
           fi
 
           # Look for Claude's review comments with improvement suggestions
-          REVIEW_COMMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "github-actions" and (.body | contains("Issues & Recommendations") or contains("Required Actions Before Merge")))] | length')
+          REVIEW_COMMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "claude" and (.body | contains("review") or contains("Review") or contains("improvement") or contains("suggest")))] | length')
 
           if [[ $REVIEW_COMMENTS -gt 0 ]]; then
             echo "Found Claude review with improvement suggestions"
@@ -132,23 +126,25 @@ jobs:
 
       - name: Run Claude Code for improvements
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'false'
-        timeout-minutes: 3
+        timeout-minutes: 5
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3
+            🔧 Improvement Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3
 
-            Read the review comments on PR #${{ steps.check-improvements.outputs.PR_NUMBER }} and implement the suggested improvements.
-            Focus on high-priority issues first. Make minimal changes.
+            The Claude Code Review action has completed and left a review on PR #${{ steps.check-improvements.outputs.PR_NUMBER }}.
 
-            Steps:
-            1. gh pr view ${{ steps.check-improvements.outputs.PR_NUMBER }} --json comments
-            2. Identify and fix the issues
-            3. make test
-            4. git add -A && git commit -m "improve: implement review suggestions (iteration ${{ steps.get-improvement.outputs.ITERATION }})" && git push
+            Your task:
+            1. Read the latest review from user "claude" using: gh pr view ${{ steps.check-improvements.outputs.PR_NUMBER }} --json comments --jq '.comments[] | select(.author.login == "claude") | .body' | tail -1
+            2. Identify specific improvements or issues mentioned in the review
+            3. Implement ONLY the high-priority fixes (security, bugs, critical issues)
+            4. Run tests: make test
+            5. Commit: git add -A && git commit -m "improve: implement code review suggestions (iteration ${{ steps.get-improvement.outputs.ITERATION }})" && git push
 
-          claude_args: '--max-thinking-tokens 20000 --allowed-tools "Read,Edit,MultiEdit,Bash(gh pr view:*),Bash(make test:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"'
+            Be selective - only fix actual issues, not style preferences.
+
+          claude_args: '--max-thinking-tokens 25000 --allowed-tools "Read,Edit,MultiEdit,Bash(gh pr view:*),Bash(make test:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(go:*)"'
 
       - name: Comment on max improvements reached
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'true'
