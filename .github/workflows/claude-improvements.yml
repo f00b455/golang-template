@@ -130,30 +130,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run Claude Code for improvements
+      - name: Run Claude Code for targeted improvements
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'false'
-        timeout-minutes: 10
+        timeout-minutes: 5
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            🔧 Code Improvement Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3 - Implementing review suggestions
+            Fix these 3 security issues in internal/handlers/rss.go ExportHeadlines function:
 
-            The code review identified specific improvements. Please implement ONLY the high-priority security fixes:
+            1. CSV injection: Add sanitizeCSVValue function to escape =,+,-,@ prefixes
+            2. Max limit: Add "if limit > 1000 { limit = 1000 }" after parsing limit
+            3. Security headers: Add X-Content-Type-Options:nosniff and X-Frame-Options:DENY
 
-            1. Add CSV injection protection by sanitizing CSV values
-            2. Add maximum export limit validation (max 1000 items)
-            3. Add security headers to export endpoints
+            Commands:
+            1. Read internal/handlers/rss.go
+            2. Edit to add fixes
+            3. Run: make test
+            4. Commit: git add -A && git commit -m "improve: security fixes" && git push
 
-            Make minimal, focused changes. Run tests after each change to ensure nothing breaks.
-
-            Use these commands:
-            - make lint && make test
-            - git add -A && git commit -m "improve: add security fixes from code review" && git push
-
-            Report completion with: gh pr comment ${{ steps.check-improvements.outputs.PR_NUMBER }} --body "✅ Security improvements implemented"
-
-          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*)"'
+          claude_args: '--allowed-tools "Read,Edit,MultiEdit,Bash(make test:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"'
 
       - name: Comment on max improvements reached
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'true'
