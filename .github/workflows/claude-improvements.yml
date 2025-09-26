@@ -100,4 +100,4 @@ jobs:
 
             IMPORTANT: You are working on PR #${{ steps.pr.outputs.PR_NUMBER }} only. Do not review, comment on, or modify any other PRs.
 
-          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr view:*),Bash(make:*),Bash(git:*),Bash(go:*)"'
+          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr view:${{ steps.pr.outputs.PR_NUMBER }}),Bash(make:*),Bash(git:*),Bash(go:*)" --disable-pr-comments --disable-reviews'
