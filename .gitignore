@@ -47,3 +47,14 @@ temp/
 
 # Backup directory
 .backup/
+
+# Hugo generated files
+site/public/
+site/resources/
+site/.hugo_build.lock
+*.hugo_build.lock
+
+# Test Hugo site (generated during BDD tests)
+features/site/public/
+features/site/resources/
+features/site/.hugo_build.lock

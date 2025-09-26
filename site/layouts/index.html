@@ -1,0 +1,82 @@
+{{ define "main" }}
+<h1>Welcome to Terminal News Reader</h1>
+
+<p>A minimal Hugo site with RSS feed integration. No fancy styling, just plain HTML content.</p>
+
+<h2>Features</h2>
+<ul>
+    <li>Story content in markdown</li>
+    <li>RSS feed integration from API</li>
+    <li>Simple search functionality</li>
+    <li>Plain HTML - no CSS styling</li>
+</ul>
+
+<h2>Latest Stories</h2>
+<ul>
+    {{ range first 5 (where .Site.RegularPages "Section" "stories") }}
+    <li>
+        <a href="{{ .Permalink }}">{{ .Title }}</a> -
+        <time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "January 2, 2006" }}</time>
+    </li>
+    {{ end }}
+</ul>
+
+<h2>RSS Feed</h2>
+<div id="rss-container">
+    <p>Loading RSS feed from API...</p>
+</div>
+
+<script>
+// Simple RSS feed fetching without any styling
+(function() {
+    const apiURL = '{{ .Site.Params.apiURL }}';
+    const container = document.getElementById('rss-container');
+
+    // HTML escape function to prevent XSS
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return String(unsafe)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Validate and sanitize URL to prevent XSS through href
+    function sanitizeUrl(url) {
+        if (!url) return '#';
+        // Only allow http, https, and relative URLs
+        const allowedProtocols = ['http:', 'https:', '/'];
+        try {
+            if (url.startsWith('/')) return url; // relative URL
+            const parsed = new URL(url);
+            if (allowedProtocols.includes(parsed.protocol)) {
+                return url;
+            }
+        } catch (e) {
+            // Invalid URL
+        }
+        return '#'; // fallback to safe value
+    }
+
+    fetch(apiURL + '/api/rss')
+        .then(response => response.json())
+        .then(data => {
+            if (data && data.items) {
+                let html = '<h3>Latest RSS Items</h3><ul>';
+                data.items.slice(0, 10).forEach(item => {
+                    const safeLink = sanitizeUrl(item.link);
+                    const safeTitle = escapeHtml(item.title);
+                    html += '<li><a href="' + escapeHtml(safeLink) + '">' + safeTitle + '</a></li>';
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            }
+        })
+        .catch(error => {
+            container.innerHTML = '<p>RSS feed currently unavailable. API may not be running.</p>';
+        });
+})();
+</script>
+{{ end }}

@@ -3,83 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Terminal News Reader | Hacker Style RSS Feed</title>
-    <link rel="stylesheet" href="/static/terminal.css">
+    <title>Terminal News Reader - Plain HTML</title>
 </head>
 <body>
-    <div id="terminal" class="terminal-container">
-        <!-- ASCII Art Header -->
-        <div class="ascii-header">
-            <pre class="ascii-art">
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  ████████╗███████╗██████╗ ███╗   ███╗██╗███╗   ██╗ █████╗ ██╗              ║
-║  ╚══██╔══╝██╔════╝██╔══██╗████╗ ████║██║████╗  ██║██╔══██╗██║              ║
-║     ██║   █████╗  ██████╔╝██╔████╔██║██║██╔██╗ ██║███████║██║              ║
-║     ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║██║██║╚██╗██║██╔══██║██║              ║
-║     ██║   ███████╗██║  ██║██║ ╚═╝ ██║██║██║ ╚████║██║  ██║███████╗         ║
-║     ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝         ║
-║                         NEWS READER v1.0.0                                   ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-            </pre>
+    <div id="terminal">
+        <!-- Header -->
+        <div>
+            <h1>TERMINAL NEWS READER v1.0.0</h1>
         </div>
 
         <!-- System Info -->
-        <div class="system-info">
-            <span class="prompt">[<span id="datetime">2025-09-25 00:00:00</span>]</span>
-            <span class="status">SYSTEM: <span class="online-status">ONLINE</span></span>
-            <span class="feed-count">FEEDS: <span id="feed-count">0</span></span>
+        <div>
+            <p>
+                [<span id="datetime">2025-09-25 00:00:00</span>]
+                SYSTEM: <span>ONLINE</span>
+                FEEDS: <span id="feed-count">0</span>
+            </p>
         </div>
 
         <!-- Command Input -->
-        <div class="command-line">
-            <span class="prompt">$</span>
-            <input type="text" id="command-input" class="command-input"
-                   placeholder="Type to filter, :help for commands..."
+        <div>
+            <label for="command-input">Filter:</label>
+            <input type="text" id="command-input"
+                   placeholder="Type to filter..."
                    autocomplete="off" spellcheck="false">
-            <span class="cursor blink">_</span>
         </div>
 
         <!-- Export Controls -->
-        <div class="export-controls">
-            <button id="export-json" class="terminal-btn" title="Download RSS feed as JSON file">
-                [↓ JSON]
+        <div>
+            <button id="export-json" title="Download RSS feed as JSON file">
+                Export JSON
             </button>
-            <button id="export-csv" class="terminal-btn" title="Download RSS feed as CSV file">
-                [↓ CSV]
+            <button id="export-csv" title="Download RSS feed as CSV file">
+                Export CSV
             </button>
-            <span class="export-status" id="export-status"></span>
+            <span id="export-status"></span>
         </div>
 
         <!-- Filter Suggestions -->
-        <div id="suggestions" class="suggestions hidden"></div>
+        <div id="suggestions" style="display: none;"></div>
 
         <!-- Output Area -->
-        <div id="output" class="output-area">
-            <div class="loading">
-                <pre class="loading-animation">
-[■□□□□□□□□□] 10%  Initializing terminal...
-                </pre>
+        <div id="output">
+            <div>
+                <p>Initializing terminal...</p>
             </div>
         </div>
 
         <!-- RSS Feed Container -->
-        <div id="rss-container" class="rss-container hidden">
+        <div id="rss-container" style="display: none;">
             <!-- RSS items will be dynamically inserted here -->
         </div>
 
         <!-- Status Bar -->
-        <div class="status-bar">
-            <span class="mode">-- NORMAL --</span>
-            <span class="position" id="position">1/0</span>
-            <span class="filter-status" id="filter-status"></span>
-            <span class="shortcuts">j/k:nav | /:search | ESC:clear | Enter:open</span>
+        <div>
+            <p>
+                <span>-- NORMAL --</span>
+                <span id="position">1/0</span>
+                <span id="filter-status"></span>
+                <br>
+                Shortcuts: j/k:navigate | /:search | ESC:clear | Enter:open
+            </p>
         </div>
     </div>
 
-    <!-- Matrix Rain Background (optional) -->
-    <canvas id="matrix-rain" class="matrix-background"></canvas>
-
     <script src="/static/terminal.js"></script>
 </body>
-</html><!-- Test pipeline fix -->
-<!-- Final pipeline test -->
+</html>

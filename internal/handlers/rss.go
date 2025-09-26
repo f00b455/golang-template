@@ -46,6 +46,11 @@ type RSSHandler struct {
 	mu          sync.RWMutex
 	httpClient  *http.Client
 	fetchMutex  sync.Mutex // Prevents concurrent RSS fetches
+	// Compiled regex patterns for better performance
+	itemRegex    *regexp.Regexp
+	titleRegex   *regexp.Regexp
+	linkRegex    *regexp.Regexp
+	pubDateRegex *regexp.Regexp
 }
 
 type cacheEntry struct {
@@ -71,21 +76,36 @@ type HeadlinesResponse struct {
 
 // NewRSSHandler creates a new RSSHandler.
 func NewRSSHandler() *RSSHandler {
+	// Create HTTP client with optimized transport settings
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
 	return &RSSHandler{
-		cfg:        config.Load(),
-		cache:      &cacheEntry{},
-		multiCache: &multiCacheEntry{},
-		httpClient: &http.Client{Timeout: requestTimeout},
+		cfg:          config.Load(),
+		cache:        &cacheEntry{},
+		multiCache:   &multiCacheEntry{},
+		httpClient:   &http.Client{Timeout: requestTimeout, Transport: transport},
+		itemRegex:    regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`),
+		titleRegex:   regexp.MustCompile(`<title>(.*?)</title>`),
+		linkRegex:    regexp.MustCompile(`<link>(.*?)</link>`),
+		pubDateRegex: regexp.MustCompile(`<pubDate>([^<]+)</pubDate>`),
 	}
 }
 
 // NewRSSHandlerWithClient creates a new RSSHandler with a custom HTTP client (for testing).
 func NewRSSHandlerWithClient(client *http.Client) *RSSHandler {
 	return &RSSHandler{
-		cfg:        config.Load(),
-		cache:      &cacheEntry{},
-		multiCache: &multiCacheEntry{},
-		httpClient: client,
+		cfg:          config.Load(),
+		cache:        &cacheEntry{},
+		multiCache:   &multiCacheEntry{},
+		httpClient:   client,
+		itemRegex:    regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`),
+		titleRegex:   regexp.MustCompile(`<title>(.*?)</title>`),
+		linkRegex:    regexp.MustCompile(`<link>(.*?)</link>`),
+		pubDateRegex: regexp.MustCompile(`<pubDate>([^<]+)</pubDate>`),
 	}
 }
 
@@ -187,9 +207,8 @@ func (h *RSSHandler) fetchLatestHeadline() (*shared.RssHeadline, error) {
 		return nil, err
 	}
 
-	// Find first item in RSS feed
-	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	matches := itemRegex.FindStringSubmatch(rssText)
+	// Find first item in RSS feed using pre-compiled regex
+	matches := h.itemRegex.FindStringSubmatch(rssText)
 	if len(matches) < 2 {
 		return nil, fmt.Errorf("no RSS items found")
 	}
@@ -207,6 +226,7 @@ func (h *RSSHandler) fetchMultipleHeadlines(limit int) ([]shared.RssHeadline, er
 }
 
 func (h *RSSHandler) fetchRSSFeed() (string, error) {
+	// Use context with timeout for better control
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 
@@ -240,12 +260,9 @@ func (h *RSSHandler) fetchRSSFeed() (string, error) {
 }
 
 func (h *RSSHandler) parseRSSItem(itemText string) (*shared.RssHeadline, error) {
-	titleRegex := regexp.MustCompile(`<title>(.*?)</title>`)
-	linkRegex := regexp.MustCompile(`<link>(.*?)</link>`)
-	pubDateRegex := regexp.MustCompile(`<pubDate>([^<]+)</pubDate>`)
-
-	titleMatches := titleRegex.FindStringSubmatch(itemText)
-	linkMatches := linkRegex.FindStringSubmatch(itemText)
+	// Use pre-compiled regex patterns for better performance
+	titleMatches := h.titleRegex.FindStringSubmatch(itemText)
+	linkMatches := h.linkRegex.FindStringSubmatch(itemText)
 
 	if len(titleMatches) < 2 || len(linkMatches) < 2 {
 		return nil, fmt.Errorf("required RSS fields not found")
@@ -255,7 +272,7 @@ func (h *RSSHandler) parseRSSItem(itemText string) (*shared.RssHeadline, error) 
 	link := h.cleanCDATA(linkMatches[1])
 
 	publishedAt := time.Now().Format(time.RFC3339)
-	if pubDateMatches := pubDateRegex.FindStringSubmatch(itemText); len(pubDateMatches) > 1 {
+	if pubDateMatches := h.pubDateRegex.FindStringSubmatch(itemText); len(pubDateMatches) > 1 {
 		if parsed, err := time.Parse(time.RFC1123Z, pubDateMatches[1]); err == nil {
 			publishedAt = parsed.Format(time.RFC3339)
 		}
@@ -276,14 +293,19 @@ func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.R
 
 // extractRSSItems finds RSS item matches in the text
 func (h *RSSHandler) extractRSSItems(rssText string, limit int) [][]string {
-	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
+	// Use pre-compiled regex for better performance
 	maxMatches := limit + (limit / 5) // Add 20% buffer for invalid items
-	return itemRegex.FindAllStringSubmatch(rssText, maxMatches)
+	return h.itemRegex.FindAllStringSubmatch(rssText, maxMatches)
 }
 
 // processRSSMatches converts regex matches to RssHeadline objects
 func (h *RSSHandler) processRSSMatches(matches [][]string, limit int) []shared.RssHeadline {
-	headlines := make([]shared.RssHeadline, 0, limit)
+	// Pre-allocate with estimated capacity
+	estimatedCapacity := limit
+	if len(matches) < limit {
+		estimatedCapacity = len(matches)
+	}
+	headlines := make([]shared.RssHeadline, 0, estimatedCapacity)
 
 	for i := 0; i < len(matches) && len(headlines) < limit; i++ {
 		if len(matches[i]) < 2 {
@@ -387,11 +409,15 @@ func (h *RSSHandler) applyFilterAndLimit(headlines []shared.RssHeadline, filter 
 		return headlines
 	}
 
+	// Pre-allocate result slice with exact capacity for better memory efficiency
 	if filter != "" {
 		headlines = h.filterHeadlines(headlines, filter)
 	}
 	if len(headlines) > limit {
-		headlines = headlines[:limit]
+		// Create new slice with exact capacity to avoid over-allocation
+		result := make([]shared.RssHeadline, limit)
+		copy(result, headlines[:limit])
+		return result
 	}
 	return headlines
 }
