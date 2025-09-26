@@ -51,18 +51,35 @@ jobs:
 
       - name: Post automation status comment
         run: |
-          gh pr comment ${{ steps.pr.outputs.PR_NUMBER }} --body "🤖 **Claude Code Automation Running**
+          gh pr comment ${{ steps.pr.outputs.PR_NUMBER }} --body "<div align=\"center\">
+
+          # <img src=\"https://github.com/images/icons/emoji/unicode/1f916.png\" width=\"20\" height=\"20\" style=\"animation: blink 1s infinite;\"> **Claude Code Automation Running** <img src=\"https://github.com/images/icons/emoji/unicode/1f916.png\" width=\"20\" height=\"20\" style=\"animation: blink 1s infinite;\">
+
+          <style>
+          @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+          }
+          .status-indicator {
+            animation: blink 1s infinite;
+            font-size: 1.2em;
+          }
+          </style>
+
+          <div class=\"status-indicator\">🔄 **ACTIVE AUTOMATION IN PROGRESS** 🔄</div>
 
           The automated improvements workflow is actively implementing review feedback.
 
-          **Status**: 🔄 In Progress
-          **Workflow**: [View Live Progress](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Status**: <span class=\"status-indicator\">⚡ Running</span>
+          **Workflow**: [🔗 View Live Progress](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
           **Started**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
-          This comment will be updated when the automation completes.
+          *This comment will be updated when the automation completes.*
 
           ---
-          *🤖 Automated by Claude Code Pipeline*"
+          *🤖 Automated by Claude Code Pipeline*
+
+          </div>"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
