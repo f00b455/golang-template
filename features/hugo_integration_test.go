@@ -75,35 +75,56 @@ func (h *HugoIntegrationContext) getHugoPath() string {
 }
 
 func (h *HugoIntegrationContext) hugoIsInstalledAndAvailable() error {
-	// Check if Hugo binary exists
 	hugoPath := h.getHugoPath()
-	if _, err := os.Stat(hugoPath); err != nil {
-		// Try to install Hugo if missing
-		installScript := "scripts/install-hugo.sh"
-		if _, scriptErr := os.Stat(installScript); scriptErr == nil {
-			// Script exists, try to run it
-			installCmd := exec.Command("bash", installScript)
-			output, installErr := installCmd.CombinedOutput()
-			if installErr != nil {
-				return fmt.Errorf("hugo binary not found at %s and installation failed: %v\nOutput: %s", hugoPath, installErr, output)
-			}
-			// Check again after installation
-			if _, err := os.Stat(hugoPath); err != nil {
-				return fmt.Errorf("hugo binary still not found at %s after installation attempt", hugoPath)
-			}
-		} else {
-			return fmt.Errorf("hugo binary not found at %s (install with: make install-hugo or bash scripts/install-hugo.sh)", hugoPath)
-		}
+
+	if err := h.ensureHugoInstalled(hugoPath); err != nil {
+		return err
 	}
 
-	// Verify Hugo can run
+	if err := h.verifyHugoExecutable(hugoPath); err != nil {
+		return err
+	}
+
+	h.hugoInstalled = true
+	return nil
+}
+
+// ensureHugoInstalled checks if Hugo exists and attempts installation if missing
+func (h *HugoIntegrationContext) ensureHugoInstalled(hugoPath string) error {
+	if _, err := os.Stat(hugoPath); err == nil {
+		return nil // Hugo already exists
+	}
+
+	return h.attemptHugoInstallation(hugoPath)
+}
+
+// attemptHugoInstallation tries to install Hugo using the install script
+func (h *HugoIntegrationContext) attemptHugoInstallation(hugoPath string) error {
+	installScript := "scripts/install-hugo.sh"
+	if _, err := os.Stat(installScript); err != nil {
+		return fmt.Errorf("hugo binary not found at %s (install with: make install-hugo or bash scripts/install-hugo.sh)", hugoPath)
+	}
+
+	installCmd := exec.Command("bash", installScript)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("hugo binary not found at %s and installation failed: %v\nOutput: %s", hugoPath, err, output)
+	}
+
+	if _, err := os.Stat(hugoPath); err != nil {
+		return fmt.Errorf("hugo binary still not found at %s after installation attempt", hugoPath)
+	}
+
+	return nil
+}
+
+// verifyHugoExecutable checks if the Hugo binary can be executed
+func (h *HugoIntegrationContext) verifyHugoExecutable(hugoPath string) error {
 	cmd := exec.Command(hugoPath, "version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("hugo binary exists but cannot execute: %v\nOutput: %s", err, output)
 	}
-
-	h.hugoInstalled = true
 	return nil
 }
 
@@ -334,7 +355,6 @@ func (h *HugoIntegrationContext) theDataShouldBeDisplayedInPlainHTML() error {
 }
 
 func (h *HugoIntegrationContext) noCSSStylingShouldBeApplied() error {
-	// Check that no CSS files are linked in templates
 	layoutDir := filepath.Join(h.siteDirectory, "layouts", "_default")
 	files, err := os.ReadDir(layoutDir)
 	if err != nil {
@@ -342,20 +362,36 @@ func (h *HugoIntegrationContext) noCSSStylingShouldBeApplied() error {
 	}
 
 	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".html") {
-			path := filepath.Join(layoutDir, file.Name())
-			content, readErr := os.ReadFile(path)
-			if readErr != nil {
-				// Log error but continue checking other files
-				fmt.Printf("Warning: failed to read template %s: %v\n", file.Name(), readErr)
-				continue
-			}
-			if strings.Contains(string(content), "<link") && strings.Contains(string(content), ".css") {
-				return fmt.Errorf("CSS file linked in template %s", file.Name())
-			}
+		if err := h.checkTemplateForCSS(layoutDir, file); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// checkTemplateForCSS checks if a template file contains CSS links
+func (h *HugoIntegrationContext) checkTemplateForCSS(layoutDir string, file os.DirEntry) error {
+	if !strings.HasSuffix(file.Name(), ".html") {
+		return nil
+	}
+
+	path := filepath.Join(layoutDir, file.Name())
+	content, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("Warning: failed to read template %s: %v\n", file.Name(), err)
+		return nil // Continue checking other files
+	}
+
+	if h.containsCSSLink(string(content)) {
+		return fmt.Errorf("CSS file linked in template %s", file.Name())
+	}
+
+	return nil
+}
+
+// containsCSSLink checks if content contains CSS link tags
+func (h *HugoIntegrationContext) containsCSSLink(content string) bool {
+	return strings.Contains(content, "<link") && strings.Contains(content, ".css")
 }
 
 func (h *HugoIntegrationContext) theDataShouldBeReadableWithoutStyles() error {
@@ -422,26 +458,36 @@ layout: "search"
 }
 
 func (h *HugoIntegrationContext) iSearchForASpecificTerm() error {
-	// Simulate search functionality with a default term
 	term := "story"
 	h.searchResults = []string{}
 
-	// In a real implementation, this would search through content
+	return h.searchContentFiles(term)
+}
+
+// searchContentFiles searches for a term in content files
+func (h *HugoIntegrationContext) searchContentFiles(term string) error {
 	contentDir := filepath.Join(h.siteDirectory, "content", "stories")
 	files, err := os.ReadDir(contentDir)
 	if err != nil {
-		return nil
+		return nil // Directory might not exist yet
 	}
 
 	for _, file := range files {
-		if h.isMarkdownFile(file.Name()) {
-			if h.fileContainsTerm(contentDir, file.Name(), term) {
-				h.searchResults = append(h.searchResults, file.Name())
-			}
-		}
+		h.addFileIfContainsTerm(contentDir, file.Name(), term)
 	}
 
 	return nil
+}
+
+// addFileIfContainsTerm adds file to results if it contains the search term
+func (h *HugoIntegrationContext) addFileIfContainsTerm(dir, filename, term string) {
+	if !h.isMarkdownFile(filename) {
+		return
+	}
+
+	if h.fileContainsTerm(dir, filename, term) {
+		h.searchResults = append(h.searchResults, filename)
+	}
 }
 
 // Helper function to check if file is a markdown file
