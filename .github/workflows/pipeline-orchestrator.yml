@@ -145,12 +145,21 @@ jobs:
           # Determine next action based on workflow that just completed
           case "$WORKFLOW_NAME" in
             "Go CI/CD")
-              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
-                echo "Tests passed, triggering code review"
+              # Check individual job statuses rather than overall workflow conclusion
+              COMMIT_SHA=$(gh pr view $PR_NUMBER --json headRefOid --jq '.headRefOid')
+
+              # Get specific job conclusions
+              LINT_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Lint") | .conclusion')
+              TEST_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Test") | .conclusion')
+
+              echo "Lint status: $LINT_STATUS, Test status: $TEST_STATUS"
+
+              if [[ "$LINT_STATUS" == "success" && "$TEST_STATUS" == "success" ]]; then
+                echo "Both lint and test passed, triggering code review"
                 echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
                 gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
-              elif [[ "$WORKFLOW_CONCLUSION" == "failure" ]]; then
-                echo "Tests failed, triggering iterative fix"
+              else
+                echo "Lint or test failed (Lint: $LINT_STATUS, Test: $TEST_STATUS), triggering iterative fix"
                 echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
                 gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
               fi
@@ -247,8 +256,8 @@ jobs:
               ;;
 
             "review")
-              echo "Triggering code review..."
-              # Code review triggers on PR synchronize, add a comment to track
+              echo "Triggering code review workflow..."
+              gh workflow run claude-code-review.yml --field pr_number="$PR_NUMBER"
               gh pr comment $PR_NUMBER --body "📝 **Pipeline Status**: Running code review"
               ;;
 

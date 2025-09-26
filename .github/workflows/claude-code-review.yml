@@ -1,10 +1,14 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull Request number to review'
+        required: true
+        type: string
 
-run-name: "Claude Code Review #${{ github.event.pull_request.number }}"
+run-name: "Claude Code Review #${{ inputs.pr_number }}"
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"
@@ -36,7 +40,7 @@ jobs:
       - name: Check Iteration Count
         id: iteration
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_NUMBER="${{ inputs.pr_number }}"
 
           # Get iteration from labels
           ITERATION=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep -oP 'pipeline:iteration-\K\d+' || echo "0")
