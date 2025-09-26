@@ -270,34 +270,41 @@ func (h *RSSHandler) parseRSSItem(itemText string) (*shared.RssHeadline, error) 
 }
 
 func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.RssHeadline {
-	// Pre-allocate slice with expected capacity for better performance
+	matches := h.extractRSSItems(rssText, limit)
+	return h.processRSSMatches(matches, limit)
+}
+
+// extractRSSItems finds RSS item matches in the text
+func (h *RSSHandler) extractRSSItems(rssText string, limit int) [][]string {
+	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
+	maxMatches := limit + (limit / 5) // Add 20% buffer for invalid items
+	return itemRegex.FindAllStringSubmatch(rssText, maxMatches)
+}
+
+// processRSSMatches converts regex matches to RssHeadline objects
+func (h *RSSHandler) processRSSMatches(matches [][]string, limit int) []shared.RssHeadline {
 	headlines := make([]shared.RssHeadline, 0, limit)
 
-	// Use compiled regex for better performance
-	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-
-	// For large datasets, limit regex operations by only finding what we need
-	// Add buffer of 20% to account for potential invalid items
-	maxMatches := limit + (limit / 5)
-	matches := itemRegex.FindAllStringSubmatch(rssText, maxMatches)
-
-	// Use index-based loop for slightly better performance
 	for i := 0; i < len(matches) && len(headlines) < limit; i++ {
 		if len(matches[i]) < 2 {
 			continue
 		}
 
-		headline, err := h.parseRSSItem(matches[i][1])
-		if err != nil {
-			// Skip invalid items and continue processing
-			continue
-		}
-		if headline != nil {
+		if headline := h.parseItemSafe(matches[i][1]); headline != nil {
 			headlines = append(headlines, *headline)
 		}
 	}
 
 	return headlines
+}
+
+// parseItemSafe safely parses an RSS item, returning nil on error
+func (h *RSSHandler) parseItemSafe(itemText string) *shared.RssHeadline {
+	headline, err := h.parseRSSItem(itemText)
+	if err != nil {
+		return nil
+	}
+	return headline
 }
 
 func (h *RSSHandler) cleanCDATA(text string) string {
@@ -467,46 +474,77 @@ func (h *RSSHandler) generateExportFilename(format, filter string) string {
 }
 
 func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
+	params, err := h.validateExportParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	headlines, err := h.prepareExportData(params.filter, params.limit)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "Unable to fetch RSS feed"})
+		return
+	}
+
+	h.performExport(c, headlines, params)
+}
+
+// exportParams holds validated export parameters
+type exportParams struct {
+	format string
+	filter string
+	limit  int
+}
+
+// validateExportParams validates all export parameters
+func (h *RSSHandler) validateExportParams(c *gin.Context) (*exportParams, error) {
 	format := c.Query("format")
 	if err := h.validateExportFormat(format); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: err.Error(),
-		})
-		return
+		return nil, err
 	}
 
-	filterKeyword := c.Query("filter")
-	if err := h.validateFilter(filterKeyword); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: err.Error(),
-		})
-		return
+	filter := c.Query("filter")
+	if err := h.validateFilter(filter); err != nil {
+		return nil, err
 	}
 
-	limit := h.parseExportLimit(c)
-	// Additional validation for export limit
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if val, err := strconv.Atoi(limitStr); err == nil && val > maxExportItems {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: fmt.Sprintf("limit exceeds maximum allowed value of %d", maxExportItems),
-			})
-			return
-		}
-	}
-
-	// Prepare data for export
-	headlines, err := h.prepareExportData(filterKeyword, limit)
+	limit, err := h.validateAndParseExportLimit(c)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
-			Error: "Unable to fetch RSS feed",
-		})
-		return
+		return nil, err
 	}
 
-	// Generate filename and export
-	filename := h.generateExportFilename(format, filterKeyword)
-	if format == "json" {
-		h.exportAsJSON(c, headlines, filterKeyword, filename)
+	return &exportParams{
+		format: format,
+		filter: filter,
+		limit:  limit,
+	}, nil
+}
+
+// validateAndParseExportLimit validates and parses the export limit
+func (h *RSSHandler) validateAndParseExportLimit(c *gin.Context) (int, error) {
+	limitStr := c.Query("limit")
+	if limitStr == "" {
+		return maxExportItems, nil
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		return maxExportItems, nil
+	}
+
+	if limit > maxExportItems {
+		return 0, fmt.Errorf("limit exceeds maximum allowed value of %d", maxExportItems)
+	}
+
+	return limit, nil
+}
+
+// performExport executes the actual export based on format
+func (h *RSSHandler) performExport(c *gin.Context, headlines []shared.RssHeadline, params *exportParams) {
+	filename := h.generateExportFilename(params.format, params.filter)
+
+	if params.format == "json" {
+		h.exportAsJSON(c, headlines, params.filter, filename)
 	} else {
 		h.exportAsCSV(c, headlines, filename)
 	}
@@ -589,24 +627,6 @@ func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline,
 	c.Data(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
 }
 
-func (h *RSSHandler) parseExportLimit(c *gin.Context) int {
-	limitStr := c.Query("limit")
-	if limitStr == "" {
-		return maxExportItems // Default to max allowed
-	}
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 {
-		return maxExportItems
-	}
-
-	// Enforce maximum export limit for security
-	if limit > maxExportItems {
-		return maxExportItems
-	}
-
-	return limit
-}
 
 // sanitizeCSVField protects against CSV injection by sanitizing field values.
 // It prefixes potentially dangerous characters with a single quote to neutralize
