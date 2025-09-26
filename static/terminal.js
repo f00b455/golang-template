@@ -5,6 +5,7 @@
     // Configuration
     const CONFIG = {
         API_ENDPOINT: '/api/rss/spiegel/top5',
+        EXPORT_ENDPOINT: '/api/rss/spiegel/export',
         REFRESH_INTERVAL: 300000, // 5 minutes
         FILTER_DELAY: 50, // 50ms debounce for real-time filtering
         THEMES: ['default', 'amber', 'matrix'],
@@ -34,7 +35,10 @@
         position: null,
         filterStatus: null,
         suggestions: null,
-        onlineStatus: null
+        onlineStatus: null,
+        exportJsonBtn: null,
+        exportCsvBtn: null,
+        exportStatus: null
     };
 
     // Initialize on DOM ready
@@ -60,12 +64,19 @@
         elements.filterStatus = document.getElementById('filter-status');
         elements.suggestions = document.getElementById('suggestions');
         elements.onlineStatus = document.querySelector('.online-status');
+        elements.exportJsonBtn = document.getElementById('export-json');
+        elements.exportCsvBtn = document.getElementById('export-csv');
+        elements.exportStatus = document.getElementById('export-status');
     }
 
     function setupEventListeners() {
         // Command input
         elements.commandInput.addEventListener('input', handleInput);
         elements.commandInput.addEventListener('keydown', handleKeydown);
+
+        // Export buttons
+        elements.exportJsonBtn.addEventListener('click', () => exportDataFormat('json'));
+        elements.exportCsvBtn.addEventListener('click', () => exportDataFormat('csv'));
 
         // Global keyboard shortcuts
         document.addEventListener('keydown', handleGlobalKeys);
@@ -292,8 +303,11 @@
     // Command System
     function handleCommand(command) {
         const cmd = command.toLowerCase().trim();
+        const parts = cmd.split(' ');
+        const mainCommand = parts[0];
+        const args = parts.slice(1);
 
-        switch (cmd) {
+        switch (mainCommand) {
             case ':help':
                 showHelp();
                 break;
@@ -311,7 +325,13 @@
                 showStats();
                 break;
             case ':export':
-                exportData();
+                // Support :export json or :export csv
+                if (args[0] === 'json' || args[0] === 'csv') {
+                    exportDataFormat(args[0]);
+                    elements.commandInput.value = '';
+                } else {
+                    exportData();
+                }
                 break;
             case ':vim':
                 enableVimMode();
@@ -324,13 +344,15 @@
     function showHelp() {
         const helpText = `
 Available Commands:
-  :help     - Show this help message
-  :refresh  - Reload RSS feed
-  :clear    - Clear the screen
-  :theme    - Cycle through themes
-  :stats    - Show statistics
-  :export   - Export current feed data
-  :vim      - Toggle vim keybindings
+  :help         - Show this help message
+  :refresh      - Reload RSS feed
+  :clear        - Clear the screen
+  :theme        - Cycle through themes
+  :stats        - Show statistics
+  :export       - Export as JSON (default)
+  :export json  - Export as JSON format
+  :export csv   - Export as CSV format
+  :vim          - Toggle vim keybindings
 
 Filter Syntax:
   word      - Include items containing 'word'
@@ -384,16 +406,109 @@ Statistics:
         elements.commandInput.value = '';
     }
 
+    async function exportDataFormat(format) {
+        try {
+            // Show exporting status
+            updateExportStatus('Exporting...', 'success');
+
+            // Disable buttons during export
+            elements.exportJsonBtn.disabled = true;
+            elements.exportCsvBtn.disabled = true;
+
+            // Get current filter from input
+            const filterValue = elements.commandInput.value;
+            const hasFilter = filterValue && !filterValue.startsWith(':');
+
+            // Determine items to export
+            const itemsToExport = hasFilter ? state.filteredItems : state.rssItems;
+
+            // Build URL with query params
+            const url = new URL(CONFIG.EXPORT_ENDPOINT, window.location.origin);
+            url.searchParams.append('format', format);
+
+            // If we have items to export, include limit
+            if (itemsToExport.length > 0) {
+                url.searchParams.append('limit', itemsToExport.length);
+            }
+
+            // Make API call
+            const response = await fetch(url.toString());
+
+            if (!response.ok) {
+                throw new Error(`Export failed: ${response.status}`);
+            }
+
+            // Get filename from Content-Disposition header or generate one
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = `rss-export-${Date.now()}.${format}`;
+
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(?:;|$)/);
+                if (filenameMatch) {
+                    filename = filenameMatch[1];
+                }
+            }
+
+            // Add filter to filename if present
+            if (hasFilter) {
+                const sanitizedFilter = filterValue.replace(/[^a-z0-9]/gi, '_').substring(0, 20);
+                filename = filename.replace(`.${format}`, `-${sanitizedFilter}.${format}`);
+            }
+
+            // Get blob from response
+            const blob = await response.blob();
+
+            // Create download link
+            const downloadUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = filename;
+
+            // Trigger download
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // Clean up
+            URL.revokeObjectURL(downloadUrl);
+
+            // Show success message
+            const message = hasFilter ?
+                `Exported ${itemsToExport.length} filtered items as ${format.toUpperCase()}` :
+                `Exported ${itemsToExport.length} items as ${format.toUpperCase()}`;
+
+            updateExportStatus(message, 'success');
+            displaySystemMessage(message);
+
+        } catch (error) {
+            console.error('Export failed:', error);
+            updateExportStatus(`Export failed: ${error.message}`, 'error');
+            displaySystemMessage(`Export failed: ${error.message}`, 'error');
+        } finally {
+            // Re-enable buttons
+            elements.exportJsonBtn.disabled = false;
+            elements.exportCsvBtn.disabled = false;
+
+            // Clear status after 3 seconds
+            setTimeout(() => {
+                updateExportStatus('', '');
+            }, 3000);
+        }
+    }
+
+    function updateExportStatus(message, type) {
+        if (elements.exportStatus) {
+            elements.exportStatus.textContent = message;
+            elements.exportStatus.className = 'export-status';
+            if (type) {
+                elements.exportStatus.classList.add(type);
+            }
+        }
+    }
+
     function exportData() {
-        const data = JSON.stringify(state.filteredItems || state.rssItems, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `rss-export-${Date.now()}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        displaySystemMessage('Data exported successfully');
+        // Legacy function for :export command
+        exportDataFormat('json');
         elements.commandInput.value = '';
     }
 
@@ -428,6 +543,23 @@ Statistics:
     function handleGlobalKeys(e) {
         // Skip if input is focused
         if (document.activeElement === elements.commandInput) return;
+
+        // Handle Ctrl+E shortcuts for export
+        if (e.ctrlKey && e.key === 'e') {
+            e.preventDefault();
+            // Wait for next key
+            const handleExportKey = (evt) => {
+                if (evt.key === 'j') {
+                    exportDataFormat('json');
+                } else if (evt.key === 'c') {
+                    exportDataFormat('csv');
+                }
+                document.removeEventListener('keydown', handleExportKey);
+            };
+            document.addEventListener('keydown', handleExportKey);
+            displaySystemMessage('Export mode: Press J for JSON, C for CSV');
+            return;
+        }
 
         switch (e.key) {
             case 'j':
