@@ -132,26 +132,31 @@ func (h *HugoIntegrationContext) iAddAStoryContentFile(filename string) error {
 	}
 
 	// Create content file with frontmatter
-	content := `---
-title: "First Story"
-date: 2025-09-26T12:00:00Z
-draft: false
----
-
-# The First Story
-
-This is a simple story content written in markdown format.
-
-## Chapter 1
-
-Once upon a time, in a land of clean code and test-driven development...
-`
+	content := h.createStoryContent("First Story", "2025-09-26T12:00:00Z")
 
 	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write content file: %v", err)
 	}
 
 	return nil
+}
+
+// Helper function to create story content with frontmatter
+func (h *HugoIntegrationContext) createStoryContent(title, date string) string {
+	return fmt.Sprintf(`---
+title: "%s"
+date: %s
+draft: false
+---
+
+# The %s
+
+This is a simple story content written in markdown format.
+
+## Chapter 1
+
+Once upon a time, in a land of clean code and test-driven development...
+`, title, date, title)
 }
 
 func (h *HugoIntegrationContext) theMarkdownFileShouldBeCreated() error {
@@ -295,21 +300,34 @@ func (h *HugoIntegrationContext) theDataShouldBeReadableWithoutStyles() error {
 }
 
 func (h *HugoIntegrationContext) iHaveMultipleStoryContentPages() error {
-	stories := []string{
-		"content/stories/story-one.md",
-		"content/stories/story-two.md",
-		"content/stories/story-three.md",
+	stories := []struct {
+		path  string
+		title string
+		num   int
+	}{
+		{"content/stories/story-one.md", "Story 1", 1},
+		{"content/stories/story-two.md", "Story 2", 2},
+		{"content/stories/story-three.md", "Story 3", 3},
 	}
 
-	for i, story := range stories {
-		fullPath := filepath.Join(h.siteDirectory, story)
-		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %v", err)
+	for _, story := range stories {
+		if err := h.createStoryFile(story.path, story.title, story.num); err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		content := fmt.Sprintf(`---
-title: "Story %d"
+// Helper function to create a story file
+func (h *HugoIntegrationContext) createStoryFile(path, title string, num int) error {
+	fullPath := filepath.Join(h.siteDirectory, path)
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %v", err)
+	}
+
+	content := fmt.Sprintf(`---
+title: "%s"
 date: 2025-09-26T12:00:00Z
 draft: false
 ---
@@ -317,11 +335,10 @@ draft: false
 # Story Number %d
 
 This is story number %d with searchable content.
-`, i+1, i+1, i+1)
+`, title, num, num)
 
-		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-			return fmt.Errorf("failed to write story file: %v", err)
-		}
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write story file: %v", err)
 	}
 	return nil
 }
@@ -353,19 +370,29 @@ func (h *HugoIntegrationContext) iSearchForASpecificTerm() error {
 	}
 
 	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".md") {
-			path := filepath.Join(contentDir, file.Name())
-			content, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			if strings.Contains(string(content), term) {
+		if h.isMarkdownFile(file.Name()) {
+			if h.fileContainsTerm(contentDir, file.Name(), term) {
 				h.searchResults = append(h.searchResults, file.Name())
 			}
 		}
 	}
 
 	return nil
+}
+
+// Helper function to check if file is a markdown file
+func (h *HugoIntegrationContext) isMarkdownFile(filename string) bool {
+	return strings.HasSuffix(filename, ".md")
+}
+
+// Helper function to check if a file contains a search term
+func (h *HugoIntegrationContext) fileContainsTerm(dir, filename, term string) bool {
+	path := filepath.Join(dir, filename)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(content), term)
 }
 
 func (h *HugoIntegrationContext) matchingContentShouldBeDisplayed() error {
