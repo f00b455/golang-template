@@ -57,8 +57,11 @@ jobs:
         run: |
           # Get PR number
           if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            # Extract PR number from workflow run
-            PR_NUMBER=$(gh api ${{ github.event.workflow_run.pull_requests_url }} --jq '.[0].number' || echo "")
+            # Extract PR number from workflow run - need to search through open PRs
+            WORKFLOW_HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+            echo "Looking for PR with head SHA: $WORKFLOW_HEAD_SHA"
+            PR_NUMBER=$(gh pr list --state open --json number,headRefOid --jq ".[] | select(.headRefOid == \"$WORKFLOW_HEAD_SHA\") | .number" || echo "")
+            echo "Found PR number: $PR_NUMBER"
           elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
           else
