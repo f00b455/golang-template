@@ -32,7 +32,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
       - name: Wait for other checks
-        run: sleep 30
+        run: sleep 60
 
       - name: Check if fixes are needed
         id: check-status
@@ -78,8 +78,10 @@ jobs:
           ALL_FAILING="$FAILING_CHECKS $FAILING_CHECK_RUNS"
           NEEDS_FIX=false
 
+          # Check for any failing checks including Test (which includes coverage)
           if [[ "$ALL_FAILING" == *"Lint"* ]] || [[ "$ALL_FAILING" == *"Test"* ]] || [[ "$ALL_FAILING" == *"Build"* ]]; then
             NEEDS_FIX=true
+            echo "Detected failing checks that need fixing: $ALL_FAILING"
           fi
 
           echo "SHOULD_FIX=$NEEDS_FIX" >> $GITHUB_OUTPUT
@@ -122,16 +124,19 @@ jobs:
 
             1. **Run the failing checks locally** to understand what's broken:
                - If "Lint" is failing: Run `make lint` and fix linting issues
-               - If "Test" is failing: Run `make test` and fix test failures
+               - If "Test" is failing: Run `make test` to check for test failures
+               - If coverage check is failing: Run `make test-coverage-check` to see coverage percentage
                - If "Build" is failing: Run `make build` and fix compilation errors
 
             2. **Fix the root cause** of each failure:
                - Read error messages carefully
+               - For coverage failures: Add comprehensive tests for uncovered code
                - Make targeted fixes to resolve issues
                - Ensure fixes don't break other functionality
 
             3. **Validate fixes** by re-running the checks:
                - Run `make lint && make test && make build` to verify all pass locally
+               - For coverage issues: Run `make test-coverage-check` to ensure 95% threshold is met
                - Only commit changes if all validations pass
 
             4. **Commit and push fixes** using descriptive commit messages:
@@ -146,6 +151,14 @@ jobs:
                - What fixes were applied
                - Current status of all checks
                - If this iteration resolves all issues or if more iterations are needed
+
+            **Special handling for coverage failures:**
+            If the test coverage is below 95%:
+            - First run `make test-coverage-check` to see the exact coverage percentage
+            - Look at the coverage report to identify which files need more tests
+            - Add comprehensive unit tests for uncovered functions and edge cases
+            - Focus on production code in `internal/` and `pkg/` directories
+            - Ensure new tests are meaningful and not just for coverage numbers
 
             **Important constraints:**
             - Focus only on making the failing checks pass
