@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -492,14 +493,9 @@ func (h *RSSHandler) exportAsJSON(c *gin.Context, headlines []shared.RssHeadline
 }
 
 func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline, filename string) {
-	// Set security headers
-	c.Header("Content-Type", "text/csv; charset=utf-8")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("X-Frame-Options", "DENY")
-	c.Header("Content-Security-Policy", "default-src 'none'")
-
-	writer := csv.NewWriter(c.Writer)
+	// Build CSV content in memory to calculate Content-Length
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 
 	// Write header
 	headers := []string{"Title", "Link", "Published_At", "Source"}
@@ -527,12 +523,25 @@ func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline,
 	}
 
 	writer.Flush()
+
+	// Check for any errors in CSV writer
 	if err := writer.Error(); err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: "Failed to flush CSV writer",
+			Error: "Failed to generate CSV",
 		})
 		return
 	}
+
+	// Set headers including Content-Length
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "default-src 'none'")
+
+	// Write the response
+	c.Data(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
 }
 
 func (h *RSSHandler) parseExportLimit(c *gin.Context) int {
