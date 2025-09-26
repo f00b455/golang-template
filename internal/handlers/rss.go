@@ -404,7 +404,11 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 
 	keyword = strings.ToLower(keyword)
 	// Pre-allocate with estimated capacity (assuming ~30% match rate)
-	filtered := make([]shared.RssHeadline, 0, len(headlines)/3)
+	estimatedCapacity := len(headlines) / 3
+	if estimatedCapacity < 1 {
+		estimatedCapacity = 1
+	}
+	filtered := make([]shared.RssHeadline, 0, estimatedCapacity)
 
 	for _, headline := range headlines {
 		if strings.Contains(strings.ToLower(headline.Title), keyword) {
