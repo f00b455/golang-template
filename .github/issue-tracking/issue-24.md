@@ -9,12 +9,12 @@
 As a user, I want to see more than 5 news items in the terminal interface, so that I can browse through a larger selection of current headlines.
 
 ## Acceptance Criteria
-- [ ] Increase the default news display limit from 5 to 200 items
-- [ ] Update the terminal UI to handle pagination for large result sets
-- [ ] Add keyboard navigation (Page Up/Page Down) for browsing long lists
-- [ ] Ensure performance remains good with 200 items loaded
-- [ ] Update API endpoint to support larger limits (currently max 5)
-- [ ] Add loading indicators for large data sets
+- [x] Increase the default news display limit from 5 to 200 items
+- [x] Update the terminal UI to handle pagination for large result sets
+- [x] Add keyboard navigation (Page Up/Page Down) for browsing long lists
+- [x] Ensure performance remains good with 200 items loaded
+- [x] Update API endpoint to support larger limits (currently max 5)
+- [x] Add loading indicators for large data sets
 
 ## Technical Requirements
 - Modify the `/api/rss/spiegel/top5` endpoint to support higher limits
@@ -27,6 +27,6 @@ Medium - Enhancement to improve user experience with more content browsing optio
 
 ## Work Log
 - Branch created: issue-24-add-support-for-displaying-top-200-news-items-in-t
-- [ ] Implementation
-- [ ] Tests
-- [ ] Documentation
+- [x] Implementation - Completed backend and frontend features
+- [x] Tests - Unit and BDD tests added for 200 item support
+- [x] Documentation - Swagger API docs updated

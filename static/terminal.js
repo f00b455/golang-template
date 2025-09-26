@@ -130,17 +130,20 @@
                 }
             }
 
-            displayLoadingIndicator(true);
+            displayLoadingIndicator(true, 'Connecting to server...');
             const response = await fetch(`${CONFIG.API_ENDPOINT}?limit=${limit}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
+            displayLoadingIndicator(true, 'Processing data...');
             const data = await response.json();
             state.rssItems = processRSSData(data);
             state.filteredItems = [...state.rssItems];
 
+            displayLoadingIndicator(true, 'Caching data...');
             // Cache the data
             saveToCache(state.rssItems);
 
+            displayLoadingIndicator(true, 'Rendering items...');
             updatePagination();
             renderRSSItems();
             updateFeedCount();
@@ -184,10 +187,10 @@
         const startItem = (state.currentPage - 1) * CONFIG.ITEMS_PER_PAGE + 1;
         const endItem = Math.min(state.currentPage * CONFIG.ITEMS_PER_PAGE, items.length);
 
-        // Update status bar with pagination info
+        // Update status bar with pagination info in the format expected by BDD tests
         if (elements.position) {
             const statusText = items.length > CONFIG.ITEMS_PER_PAGE ?
-                `${startItem}-${endItem} of ${items.length} | Page ${state.currentPage}/${state.totalPages}` :
+                `${startItem}-${endItem} of ${items.length}` :
                 `${items.length} items`;
             elements.position.textContent = statusText;
         }
@@ -263,20 +266,32 @@
     }
 
     // Add loading indicator functions
-    function displayLoadingIndicator(show) {
+    function displayLoadingIndicator(show, progressText = null) {
         if (show) {
             state.isLoading = true;
-            const loadingDiv = document.createElement('div');
-            loadingDiv.id = 'loading-indicator';
-            loadingDiv.className = 'loading-indicator';
-            loadingDiv.innerHTML = `
-                <div class="loading-spinner"></div>
-                <div class="loading-text">Loading ${CONFIG.MAX_ITEMS} news items...</div>
-                <div class="loading-progress"></div>
-            `;
+            let loadingDiv = document.getElementById('loading-indicator');
 
-            if (elements.rssContainer && !document.getElementById('loading-indicator')) {
-                elements.rssContainer.parentNode.insertBefore(loadingDiv, elements.rssContainer);
+            if (!loadingDiv) {
+                loadingDiv = document.createElement('div');
+                loadingDiv.id = 'loading-indicator';
+                loadingDiv.className = 'loading-indicator';
+                loadingDiv.innerHTML = `
+                    <div class="loading-spinner"></div>
+                    <div class="loading-text">Loading ${CONFIG.MAX_ITEMS} news items...</div>
+                    <div class="loading-progress"></div>
+                `;
+
+                if (elements.rssContainer) {
+                    elements.rssContainer.parentNode.insertBefore(loadingDiv, elements.rssContainer);
+                }
+            }
+
+            // Update progress text if provided
+            if (progressText && loadingDiv) {
+                const progressElement = loadingDiv.querySelector('.loading-progress');
+                if (progressElement) {
+                    progressElement.textContent = progressText;
+                }
             }
         } else {
             state.isLoading = false;
@@ -548,6 +563,19 @@
                 break;
             case ':clear':
                 clearScreen();
+                break;
+            case ':page':
+                if (args.length > 0) {
+                    const pageNum = parseInt(args[0]);
+                    if (!isNaN(pageNum)) {
+                        navigateToPage(pageNum);
+                        elements.commandInput.value = '';
+                    } else {
+                        displaySystemMessage('Invalid page number. Usage: :page <number>', 'error');
+                    }
+                } else {
+                    displaySystemMessage('Usage: :page <number> - Jump to specific page', 'info');
+                }
                 break;
             case ':theme':
                 cycleTheme();

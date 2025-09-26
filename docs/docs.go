@@ -85,8 +85,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 1000,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Number of headlines to export",
+                        "description": "Number of headlines to export (1-1000)",
                         "name": "limit",
                         "in": "query"
                     }

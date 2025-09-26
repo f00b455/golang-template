@@ -508,21 +508,10 @@ body.theme-matrix {
 }
 
 .loading-progress {
-    width: 200px;
-    height: 4px;
-    background: var(--term-dim);
-    border-radius: 2px;
     margin-top: 10px;
-    overflow: hidden;
-}
-
-.loading-progress::after {
-    content: '';
-    display: block;
-    width: 40%;
-    height: 100%;
-    background: var(--term-green);
-    animation: progress 1.5s ease-in-out infinite;
+    font-size: 0.9em;
+    color: var(--term-yellow);
+    min-height: 20px;
 }
 
 @keyframes spin {

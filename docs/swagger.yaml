@@ -82,8 +82,10 @@ paths:
         in: query
         name: filter
         type: string
-      - description: Number of headlines to export
+      - description: Number of headlines to export (1-1000)
         in: query
+        maximum: 1000
+        minimum: 1
         name: limit
         type: integer
       produces:
