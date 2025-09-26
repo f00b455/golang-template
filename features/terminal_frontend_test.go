@@ -37,7 +37,7 @@ func (t *terminalFrontendContext) iHaveARunningHugoStaticSiteWithTerminalTheme()
 		} else {
 			// Return mock HTML if files don't exist
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`<!DOCTYPE html>
+			_, _ = w.Write([]byte(`<!DOCTYPE html>
 <html>
 <head>
 	<link rel="stylesheet" href="/terminal.css">
