@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Install Hugo binary for the project
-# This script installs the latest stable version of Hugo
+# This script installs a specific version of Hugo
 
 set -e
 
-# Configuration
-HUGO_VERSION="0.140.2"
-HUGO_BASE_URL="https://github.com/gohugoio/hugo/releases/download"
-BIN_DIR="$(pwd)/bin"
+# Configuration - allow override via environment variable
+HUGO_VERSION="${HUGO_VERSION:-0.140.2}"
+HUGO_BASE_URL="${HUGO_BASE_URL:-https://github.com/gohugoio/hugo/releases/download}"
+BIN_DIR="${BIN_DIR:-$(pwd)/bin}"
 
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -56,16 +56,28 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf ${TMP_DIR}' EXIT
 
 # Download Hugo
-curl -L -o "${TMP_DIR}/${HUGO_FILE}" "${DOWNLOAD_URL}"
+if ! curl -L -o "${TMP_DIR}/${HUGO_FILE}" "${DOWNLOAD_URL}"; then
+    echo "Failed to download Hugo from ${DOWNLOAD_URL}"
+    exit 1
+fi
 
 # Extract Hugo
-tar -xzf "${TMP_DIR}/${HUGO_FILE}" -C "${TMP_DIR}"
+if ! tar -xzf "${TMP_DIR}/${HUGO_FILE}" -C "${TMP_DIR}"; then
+    echo "Failed to extract Hugo archive"
+    exit 1
+fi
 
 # Move Hugo binary to bin directory
-mv "${TMP_DIR}/hugo" "${BIN_DIR}/hugo"
+if ! mv "${TMP_DIR}/hugo" "${BIN_DIR}/hugo"; then
+    echo "Failed to move Hugo binary to ${BIN_DIR}"
+    exit 1
+fi
 
 # Make it executable
-chmod +x "${BIN_DIR}/hugo"
+if ! chmod +x "${BIN_DIR}/hugo"; then
+    echo "Failed to make Hugo binary executable"
+    exit 1
+fi
 
 # Verify installation
 if "${BIN_DIR}/hugo" version > /dev/null 2>&1; then

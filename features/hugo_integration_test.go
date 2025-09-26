@@ -27,8 +27,14 @@ type HugoIntegrationContext struct {
 }
 
 func NewHugoIntegrationContext() *HugoIntegrationContext {
+	// Allow site directory to be configured via environment variable
+	siteDir := os.Getenv("HUGO_SITE_DIR")
+	if siteDir == "" {
+		siteDir = "site"
+	}
+
 	return &HugoIntegrationContext{
-		siteDirectory: "site",
+		siteDirectory: siteDir,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -51,6 +57,11 @@ func (h *HugoIntegrationContext) Cleanup() {
 // getHugoPath returns the path to the Hugo binary
 // It tries to find the binary relative to the current working directory
 func (h *HugoIntegrationContext) getHugoPath() string {
+	// Check for environment variable override
+	if hugoBin := os.Getenv("HUGO_BINARY_PATH"); hugoBin != "" {
+		return hugoBin
+	}
+
 	// Try from project root (when running go test ./...)
 	if _, err := os.Stat("bin/hugo"); err == nil {
 		return "bin/hugo"
@@ -72,8 +83,9 @@ func (h *HugoIntegrationContext) hugoIsInstalledAndAvailable() error {
 		if _, scriptErr := os.Stat(installScript); scriptErr == nil {
 			// Script exists, try to run it
 			installCmd := exec.Command("bash", installScript)
-			if installErr := installCmd.Run(); installErr != nil {
-				return fmt.Errorf("hugo binary not found at %s and installation failed: %v", hugoPath, installErr)
+			output, installErr := installCmd.CombinedOutput()
+			if installErr != nil {
+				return fmt.Errorf("hugo binary not found at %s and installation failed: %v\nOutput: %s", hugoPath, installErr, output)
 			}
 			// Check again after installation
 			if _, err := os.Stat(hugoPath); err != nil {
@@ -86,8 +98,9 @@ func (h *HugoIntegrationContext) hugoIsInstalledAndAvailable() error {
 
 	// Verify Hugo can run
 	cmd := exec.Command(hugoPath, "version")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("hugo binary exists but cannot execute: %v", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("hugo binary exists but cannot execute: %v\nOutput: %s", err, output)
 	}
 
 	h.hugoInstalled = true
@@ -103,8 +116,8 @@ func (h *HugoIntegrationContext) theHugoSiteDirectoryExistsAt(dir string) error 
 func (h *HugoIntegrationContext) iHaveNoExistingHugoSite() error {
 	// Remove site directory if it exists
 	if _, err := os.Stat(h.siteDirectory); err == nil {
-		if err := os.RemoveAll(h.siteDirectory); err != nil {
-			return fmt.Errorf("failed to remove existing site: %v", err)
+		if removeErr := os.RemoveAll(h.siteDirectory); removeErr != nil {
+			return fmt.Errorf("failed to remove existing site: %v", removeErr)
 		}
 	}
 	return nil
@@ -113,9 +126,10 @@ func (h *HugoIntegrationContext) iHaveNoExistingHugoSite() error {
 func (h *HugoIntegrationContext) iRunTheHugoSiteCreationCommand() error {
 	hugoPath := h.getHugoPath()
 	cmd := exec.Command(hugoPath, "new", "site", h.siteDirectory, "--force")
-	if err := cmd.Run(); err != nil {
-		h.lastError = err
-		return fmt.Errorf("failed to create Hugo site: %v", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		h.lastError = fmt.Errorf("command failed: %v\nOutput: %s", err, output)
+		return fmt.Errorf("failed to create Hugo site: %v\nOutput: %s", err, output)
 	}
 	// Track created directory for cleanup
 	h.createdDirs = append(h.createdDirs, h.siteDirectory)
@@ -149,9 +163,9 @@ func (h *HugoIntegrationContext) itShouldHaveNoThemesInstalled() error {
 	themesDir := filepath.Join(h.siteDirectory, "themes")
 	if _, err := os.Stat(themesDir); err == nil {
 		// Check if themes directory is empty
-		entries, err := os.ReadDir(themesDir)
-		if err != nil {
-			return fmt.Errorf("failed to read themes directory: %v", err)
+		entries, readErr := os.ReadDir(themesDir)
+		if readErr != nil {
+			return fmt.Errorf("failed to read themes directory: %v", readErr)
 		}
 		if len(entries) > 0 {
 			return fmt.Errorf("themes directory is not empty")
@@ -330,8 +344,10 @@ func (h *HugoIntegrationContext) noCSSStylingShouldBeApplied() error {
 	for _, file := range files {
 		if strings.HasSuffix(file.Name(), ".html") {
 			path := filepath.Join(layoutDir, file.Name())
-			content, err := os.ReadFile(path)
-			if err != nil {
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				// Log error but continue checking other files
+				fmt.Printf("Warning: failed to read template %s: %v\n", file.Name(), readErr)
 				continue
 			}
 			if strings.Contains(string(content), "<link") && strings.Contains(string(content), ".css") {
@@ -538,8 +554,9 @@ func (h *HugoIntegrationContext) iStartTheHugoServerOnPort(port string) error {
 	// Just verify the command would work
 	hugoPath := h.getHugoPath()
 	cmd := exec.Command(hugoPath, "server", "-s", h.siteDirectory, "-p", port, "--help")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("hugo server command not available: %v", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("hugo server command not available: %v\nOutput: %s", err, output)
 	}
 	h.hugoRunning = true
 	return nil
