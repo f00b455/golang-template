@@ -1,0 +1,3 @@
+Test trigger for CI/CD pipeline verification
+Testing Hugo integration in CI environment
+Issue #28 verification
