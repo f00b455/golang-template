@@ -179,8 +179,9 @@ test-cover: deps
 
 # Run tests with coverage and validate threshold (95% minimum for production code)
 test-coverage-check: deps
-	@echo "Running tests with coverage validation..."
-	$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic $(SRC_DIR)
+	@echo "Running tests with coverage validation for production code (pkg/)..."
+	@echo "Testing pkg packages only for production coverage check..."
+	$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./pkg/...
 	@chmod +x scripts/check-coverage.sh
 	@./scripts/check-coverage.sh 95.0 coverage.out
 

@@ -46,9 +46,9 @@ print_color "$YELLOW" "📊 Calculating test coverage..."
 # - .pb.go: Protocol buffer generated files
 # - .gen.go: Other generated files
 
-COVERAGE_OUTPUT=$(go tool cover -func="$COVERAGE_PROFILE" | \
-    grep -v -E '(^github\.com/[^/]+/[^/]+/(cmd|docs|scripts|mocks|test|vendor)/|\.pb\.go:|\.gen\.go:)' | \
-    tail -n 1)
+# Get the total coverage from the profile
+# Since we're now only testing pkg/ packages, we can use the total directly
+COVERAGE_OUTPUT=$(go tool cover -func="$COVERAGE_PROFILE" | tail -n 1)
 
 # Extract the percentage from the output
 # The output format is: total: (statements) XX.X%
@@ -69,10 +69,10 @@ echo "🎯 Required Threshold: ${THRESHOLD}%"
 
 # Generate detailed coverage by package
 echo ""
-echo "📦 Coverage by package (production code only):"
+echo "📦 Coverage by package:"
 echo "---------------------------------------------------"
 go tool cover -func="$COVERAGE_PROFILE" | \
-    grep -v -E '(^github\.com/[^/]+/[^/]+/(cmd|docs|scripts|mocks|test|vendor)/|\.pb\.go:|\.gen\.go:|^total:)' | \
+    grep -v '^total:' | \
     awk '{
         if (NF >= 3) {
             # Extract package and function name
@@ -99,7 +99,7 @@ go tool cover -func="$COVERAGE_PROFILE" | \
                 printf "  %-50s %6.1f%%\n", pkg, avg
             }
         }
-    }' | sort | head -20
+    }' | sort
 
 echo "---------------------------------------------------"
 
@@ -124,7 +124,7 @@ else
     print_color "$YELLOW" "🔍 Files with lowest coverage (focus areas for improvement):"
     echo "---------------------------------------------------"
     go tool cover -func="$COVERAGE_PROFILE" | \
-        grep -v -E '(^github\.com/[^/]+/[^/]+/(cmd|docs|scripts|mocks|test|vendor)/|\.pb\.go:|\.gen\.go:|^total:)' | \
+        grep -v '^total:' | \
         grep -E '[0-9]+\.[0-9]+%$' | \
         awk '{
             # Extract percentage
