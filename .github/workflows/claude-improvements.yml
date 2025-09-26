@@ -22,7 +22,7 @@ jobs:
         run: |
           # Get PR number from workflow run
           SHA="${{ github.event.workflow_run.head_sha }}"
-          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/$SHA/pulls --jq '.[0].number' || echo "")
+          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/$SHA/pulls --jq '[0].number' || echo "")
 
           if [[ -z "$PR_NUMBER" ]]; then
             echo "No PR found for SHA: $SHA"
