@@ -251,7 +251,7 @@ jobs:
 
             "fix")
               echo "Triggering iterative fix workflow..."
-              # The iterative fix workflow will trigger on check failures
+              gh workflow run claude-iterative-fix.yml --field pr_number="$PR_NUMBER"
               gh pr comment $PR_NUMBER --body "🔧 **Pipeline Status**: Applying automated fixes"
               ;;
 
