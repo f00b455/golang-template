@@ -174,6 +174,9 @@
         if (state.currentPage > state.totalPages) {
             state.currentPage = Math.max(1, state.totalPages);
         }
+
+        // Update pagination UI controls
+        updatePaginationControls();
     }
 
     function updatePaginationStatus() {
@@ -187,6 +190,64 @@
                 `${startItem}-${endItem} of ${items.length} | Page ${state.currentPage}/${state.totalPages}` :
                 `${items.length} items`;
             elements.position.textContent = statusText;
+        }
+    }
+
+    // Add pagination controls UI
+    function updatePaginationControls() {
+        // Check if pagination controls container exists, if not create it
+        let paginationContainer = document.getElementById('pagination-controls');
+        if (!paginationContainer && elements.rssContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.id = 'pagination-controls';
+            paginationContainer.className = 'pagination-controls';
+            elements.rssContainer.parentNode.insertBefore(paginationContainer, elements.rssContainer.nextSibling);
+        }
+
+        if (!paginationContainer) return;
+
+        const items = state.filteredItems.length > 0 ? state.filteredItems : state.rssItems;
+        if (items.length <= CONFIG.ITEMS_PER_PAGE) {
+            paginationContainer.style.display = 'none';
+            return;
+        }
+
+        paginationContainer.style.display = 'flex';
+        paginationContainer.innerHTML = `
+            <button class="pagination-btn" id="page-first" ${state.currentPage === 1 ? 'disabled' : ''}>
+                &laquo; First
+            </button>
+            <button class="pagination-btn" id="page-prev" ${state.currentPage === 1 ? 'disabled' : ''}>
+                &lsaquo; Previous
+            </button>
+            <span class="pagination-info">
+                Page <input type="number" id="page-input" min="1" max="${state.totalPages}"
+                    value="${state.currentPage}" class="page-input"> of ${state.totalPages}
+            </span>
+            <button class="pagination-btn" id="page-next" ${state.currentPage === state.totalPages ? 'disabled' : ''}>
+                Next &rsaquo;
+            </button>
+            <button class="pagination-btn" id="page-last" ${state.currentPage === state.totalPages ? 'disabled' : ''}>
+                Last &raquo;
+            </button>
+        `;
+
+        // Attach event handlers
+        document.getElementById('page-first')?.addEventListener('click', () => navigateToPage(1));
+        document.getElementById('page-prev')?.addEventListener('click', () => navigateToPage(state.currentPage - 1));
+        document.getElementById('page-next')?.addEventListener('click', () => navigateToPage(state.currentPage + 1));
+        document.getElementById('page-last')?.addEventListener('click', () => navigateToPage(state.totalPages));
+
+        const pageInput = document.getElementById('page-input');
+        if (pageInput) {
+            pageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const page = parseInt(e.target.value);
+                    if (page >= 1 && page <= state.totalPages) {
+                        navigateToPage(page);
+                    }
+                }
+            });
         }
     }
 
@@ -515,6 +576,14 @@
                     displaySystemMessage('Usage: :page <number>', 'error');
                 }
                 break;
+            case ':first':
+                navigateToPage(1);
+                elements.commandInput.value = '';
+                break;
+            case ':last':
+                navigateToPage(state.totalPages);
+                elements.commandInput.value = '';
+                break;
             default:
                 displaySystemMessage(`Unknown command: ${cmd}`, 'error');
         }
@@ -533,6 +602,8 @@ Available Commands:
   :export csv   - Export as CSV format
   :vim          - Toggle vim keybindings
   :page <num>   - Jump to specific page
+  :first        - Go to first page
+  :last         - Go to last page
 
 Filter Syntax:
   word      - Include items containing 'word'
@@ -549,7 +620,10 @@ Keyboard Shortcuts:
   Escape    - Clear filter
   Tab       - Autocomplete
   PageDown  - Next page
-  PageUp    - Previous page`;
+  PageUp    - Previous page
+  Home      - First page
+  End       - Last page
+  1-9       - Jump to page (when not in input)`;
 
         displaySystemMessage(helpText);
         elements.commandInput.value = '';
@@ -858,6 +932,30 @@ Statistics:
                     navigateToPage(state.currentPage - 1);
                 }
                 break;
+            case 'Home':
+                e.preventDefault();
+                navigateToPage(1);
+                break;
+            case 'End':
+                e.preventDefault();
+                navigateToPage(state.totalPages);
+                break;
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+                // Quick page navigation with number keys
+                e.preventDefault();
+                const pageNum = parseInt(e.key);
+                if (pageNum <= state.totalPages) {
+                    navigateToPage(pageNum);
+                }
+                break;
         }
     }
 
@@ -927,7 +1025,7 @@ Statistics:
 
         // Command suggestions
         if (value.startsWith(':')) {
-            const commands = [':help', ':refresh', ':clear', ':theme', ':stats', ':export', ':vim'];
+            const commands = [':help', ':refresh', ':clear', ':theme', ':stats', ':export', ':vim', ':page', ':first', ':last'];
             suggestions.push(...commands.filter(cmd => cmd.startsWith(value)));
         } else {
             // Content suggestions from RSS items

@@ -40,11 +40,12 @@ const (
 
 // RSSHandler handles RSS-related requests.
 type RSSHandler struct {
-	cfg        *config.Config
-	cache      *cacheEntry
-	multiCache *multiCacheEntry
-	mu         sync.RWMutex
-	httpClient *http.Client
+	cfg         *config.Config
+	cache       *cacheEntry
+	multiCache  *multiCacheEntry
+	mu          sync.RWMutex
+	httpClient  *http.Client
+	fetchMutex  sync.Mutex // Prevents concurrent RSS fetches
 }
 
 type cacheEntry struct {
@@ -269,27 +270,30 @@ func (h *RSSHandler) parseRSSItem(itemText string) (*shared.RssHeadline, error) 
 }
 
 func (h *RSSHandler) parseMultipleRSSItems(rssText string, limit int) []shared.RssHeadline {
-	var headlines []shared.RssHeadline
+	// Pre-allocate slice with expected capacity for better performance
+	headlines := make([]shared.RssHeadline, 0, limit)
 
+	// Use compiled regex for better performance
 	itemRegex := regexp.MustCompile(`<item[^>]*>([\s\S]*?)</item>`)
-	// Find all matches in the RSS text (use -1 to get all matches)
-	matches := itemRegex.FindAllStringSubmatch(rssText, -1)
 
-	for _, match := range matches {
-		if len(match) < 2 {
+	// For large datasets, limit regex operations by only finding what we need
+	// Add buffer of 20% to account for potential invalid items
+	maxMatches := limit + (limit / 5)
+	matches := itemRegex.FindAllStringSubmatch(rssText, maxMatches)
+
+	// Use index-based loop for slightly better performance
+	for i := 0; i < len(matches) && len(headlines) < limit; i++ {
+		if len(matches[i]) < 2 {
 			continue
 		}
 
-		headline, err := h.parseRSSItem(match[1])
+		headline, err := h.parseRSSItem(matches[i][1])
 		if err != nil {
 			// Skip invalid items and continue processing
 			continue
 		}
 		if headline != nil {
 			headlines = append(headlines, *headline)
-			if len(headlines) >= limit {
-				break
-			}
 		}
 	}
 
@@ -339,14 +343,29 @@ func (h *RSSHandler) getCachedHeadlines() ([]shared.RssHeadline, int) {
 
 // fetchAndCacheHeadlines fetches headlines from RSS feed and updates the cache.
 func (h *RSSHandler) fetchAndCacheHeadlines() ([]shared.RssHeadline, error) {
+	// Prevent concurrent RSS fetches to avoid overwhelming the server
+	h.fetchMutex.Lock()
+	defer h.fetchMutex.Unlock()
+
+	// Double-check cache after acquiring lock
+	headlines, _ := h.getCachedHeadlines()
+	if headlines != nil {
+		return headlines, nil
+	}
+
+	// Fetch headlines from RSS feed
 	headlines, err := h.fetchMultipleHeadlines(maxFetchItems)
 	if err != nil || len(headlines) == 0 {
 		return nil, err
 	}
 
+	// Make a copy to avoid data races when reading from cache
+	headlinesCopy := make([]shared.RssHeadline, len(headlines))
+	copy(headlinesCopy, headlines)
+
 	h.mu.Lock()
 	h.multiCache = &multiCacheEntry{
-		data:      headlines,
+		data:      headlinesCopy,
 		timestamp: time.Now(),
 	}
 	h.mu.Unlock()
@@ -356,6 +375,11 @@ func (h *RSSHandler) fetchAndCacheHeadlines() ([]shared.RssHeadline, error) {
 
 // applyFilterAndLimit applies the filter keyword and limit to headlines.
 func (h *RSSHandler) applyFilterAndLimit(headlines []shared.RssHeadline, filter string, limit int) []shared.RssHeadline {
+	// Early return for common case
+	if filter == "" && len(headlines) <= limit {
+		return headlines
+	}
+
 	if filter != "" {
 		headlines = h.filterHeadlines(headlines, filter)
 	}
@@ -372,7 +396,8 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 	}
 
 	keyword = strings.ToLower(keyword)
-	var filtered []shared.RssHeadline
+	// Pre-allocate with estimated capacity (assuming ~30% match rate)
+	filtered := make([]shared.RssHeadline, 0, len(headlines)/3)
 
 	for _, headline := range headlines {
 		if strings.Contains(strings.ToLower(headline.Title), keyword) {
