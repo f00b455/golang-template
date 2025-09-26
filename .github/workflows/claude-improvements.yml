@@ -128,4 +128,4 @@ jobs:
             - ONLY modify files in the current branch using Read, Edit, Write, MultiEdit tools
             - Your job is to implement changes, not to provide reviews or feedback
 
-          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(git:*),Bash(make:*),Bash(go:*)" --blocked-tools "Bash(gh:*)"'
+          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(git:*),Bash(make:*),Bash(go:*)"'
