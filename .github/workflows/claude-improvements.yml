@@ -18,22 +18,25 @@ jobs:
       id-token: write
 
     steps:
-      - name: Get PR number from workflow name
+      - name: Get PR number from workflow run context
         id: pr
         run: |
-          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
-          echo "Workflow name: $WORKFLOW_NAME"
+          # Get PR numbers from the triggering workflow run
+          PR_NUMBERS=$(gh api /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/pull-requests --jq '.[].number')
 
-          # Extract PR number from workflow name pattern: "Title #123"
-          PR_NUMBER=$(echo "$WORKFLOW_NAME" | grep -oE '#[0-9]+' | grep -oE '[0-9]+' | head -1)
-
-          if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found in workflow name: $WORKFLOW_NAME"
+          if [[ -z "$PR_NUMBERS" ]]; then
+            echo "No PR found for workflow run ID: ${{ github.event.workflow_run.id }}"
+            echo "Workflow run head SHA: ${{ github.event.workflow_run.head_sha }}"
+            echo "Workflow run head branch: ${{ github.event.workflow_run.head_branch }}"
             exit 1
           fi
 
+          # Take the first PR number (usually there's only one)
+          PR_NUMBER=$(echo "$PR_NUMBERS" | head -1)
+
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "Found PR #$PR_NUMBER from workflow name"
+          echo "Found PR #$PR_NUMBER from workflow run context"
+          echo "Workflow run ID: ${{ github.event.workflow_run.id }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
