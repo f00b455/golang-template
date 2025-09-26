@@ -41,6 +41,11 @@ jobs:
     - name: Install dependencies
       run: go mod download
 
+    - name: Install Hugo
+      run: |
+        bash scripts/install-hugo.sh
+        ./bin/hugo version
+
     - name: Build binaries for BDD tests
       run: |
         go build -o bin/api-server ./cmd/api
