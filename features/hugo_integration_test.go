@@ -1,6 +1,7 @@
 package features
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ type HugoIntegrationContext struct {
 	searchResults   []string
 	lastError       error
 	httpClient      *http.Client
+	createdDirs     []string  // Track directories created during test
 }
 
 func NewHugoIntegrationContext() *HugoIntegrationContext {
@@ -30,6 +32,19 @@ func NewHugoIntegrationContext() *HugoIntegrationContext {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
+		createdDirs: []string{},
+	}
+}
+
+// Cleanup removes all test-created directories
+func (h *HugoIntegrationContext) Cleanup() {
+	// Clean up in reverse order to handle nested directories
+	for i := len(h.createdDirs) - 1; i >= 0; i-- {
+		_ = os.RemoveAll(h.createdDirs[i])
+	}
+	// Always try to clean up the default site directory
+	if h.siteDirectory != "" {
+		_ = os.RemoveAll(h.siteDirectory)
 	}
 }
 
@@ -102,6 +117,8 @@ func (h *HugoIntegrationContext) iRunTheHugoSiteCreationCommand() error {
 		h.lastError = err
 		return fmt.Errorf("failed to create Hugo site: %v", err)
 	}
+	// Track created directory for cleanup
+	h.createdDirs = append(h.createdDirs, h.siteDirectory)
 	return nil
 }
 
@@ -148,6 +165,8 @@ func (h *HugoIntegrationContext) iHaveAHugoSiteInitialized() error {
 		// Create site if it doesn't exist
 		return h.iRunTheHugoSiteCreationCommand()
 	}
+	// Track existing directory for cleanup
+	h.createdDirs = append(h.createdDirs, h.siteDirectory)
 	return nil
 }
 
@@ -551,6 +570,12 @@ func (h *HugoIntegrationContext) bothAPIAndHugoShouldRunSimultaneously(apiPort, 
 
 func InitializeHugoScenario(ctx *godog.ScenarioContext) {
 	h := NewHugoIntegrationContext()
+
+	// Register cleanup after each scenario
+	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		h.Cleanup()
+		return ctx, nil
+	})
 
 	// Background steps
 	ctx.Step(`^Hugo is installed and available$`, h.hugoIsInstalledAndAvailable)
