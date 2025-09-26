@@ -49,6 +49,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Post automation status comment
+        run: |
+          gh pr comment ${{ steps.pr.outputs.PR_NUMBER }} --body "🤖 **Claude Code Automation Running**
+
+          The automated improvements workflow is actively implementing review feedback.
+
+          **Status**: 🔄 In Progress
+          **Workflow**: [View Live Progress](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Started**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          This comment will be updated when the automation completes.
+
+          ---
+          *🤖 Automated by Claude Code Pipeline*"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Claude Code to implement review feedback
         uses: anthropics/claude-code-action@v1
         with:
