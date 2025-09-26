@@ -33,6 +33,23 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Check Iteration Count
+        id: iteration
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          # Get iteration from labels
+          ITERATION=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep -oP 'pipeline:iteration-\K\d+' || echo "0")
+
+          if [[ -z "$ITERATION" ]]; then
+            ITERATION=0
+          fi
+
+          echo "ITERATION=$ITERATION" >> $GITHUB_OUTPUT
+          echo "Reviewing PR #$PR_NUMBER (iteration: $ITERATION)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
@@ -45,8 +62,18 @@ jobs:
             - Performance considerations
             - Security concerns
             - Test coverage
-            
+
+            IMPORTANT CONTEXT:
+            - This is iteration ${{ steps.iteration.outputs.ITERATION }} of the review process
+            - If this is iteration 2 or higher, focus on whether previous issues were addressed
+            - Be progressively more lenient with each iteration - avoid nitpicking on later iterations
+            - After 3 iterations, only flag critical issues (bugs, security problems)
+
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            At the end of your review, clearly state one of:
+            - "✅ APPROVED - No major issues found" if the code is ready
+            - "🔧 CHANGES REQUESTED - Issues found that need fixing" if there are problems
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
           
