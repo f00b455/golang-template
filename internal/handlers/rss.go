@@ -422,7 +422,6 @@ func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
 	}
 
 	// Apply filter
-	originalCount := len(headlines)
 	if filterKeyword != "" {
 		headlines = h.filterHeadlines(headlines, filterKeyword)
 	}
