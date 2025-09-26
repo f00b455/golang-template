@@ -17,30 +17,22 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Get PR number
+      - name: Get PR number from workflow name
         id: pr
         run: |
-          # Extract PR number from workflow name (format: "Claude Code Review #123")
-          WORKFLOW_NAME="${{ github.event.workflow_run.display_title }}"
-          echo "Workflow display title: $WORKFLOW_NAME"
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          echo "Workflow name: $WORKFLOW_NAME"
 
-          # Extract PR number from workflow name using regex
-          if [[ "$WORKFLOW_NAME" =~ \#([0-9]+) ]]; then
-            PR_NUMBER="${BASH_REMATCH[1]}"
-          else
-            echo "Could not extract PR number from workflow name: $WORKFLOW_NAME"
-            echo "Falling back to SHA-based lookup"
-            SHA="${{ github.event.workflow_run.head_sha }}"
-            PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/$SHA/pulls --jq '[0].number' 2>/dev/null || echo "")
-          fi
+          # Extract PR number from workflow name pattern: "Title (#123)"
+          PR_NUMBER=$(echo "$WORKFLOW_NAME" | grep -oE '\(#[0-9]+\)' | grep -oE '[0-9]+' | head -1)
 
           if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found in workflow name or SHA lookup"
+            echo "No PR number found in workflow name: $WORKFLOW_NAME"
             exit 1
           fi
 
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "Found PR #$PR_NUMBER"
+          echo "Found PR #$PR_NUMBER from workflow name"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
