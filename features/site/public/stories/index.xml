@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Stories on My New Hugo Site</title>
+    <link>https://example.org/stories/</link>
+    <description>Recent content in Stories on My New Hugo Site</description>
+    <generator>Hugo</generator>
+    <language>en-us</language>
+    <lastBuildDate>Fri, 26 Sep 2025 12:00:00 +0000</lastBuildDate>
+    <atom:link href="https://example.org/stories/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>First Story</title>
+      <link>https://example.org/stories/first-story/</link>
+      <pubDate>Fri, 26 Sep 2025 12:00:00 +0000</pubDate>
+      <guid>https://example.org/stories/first-story/</guid>
+      <description>&lt;h1 id=&#34;the-first-story&#34;&gt;The First Story&lt;/h1&gt;&#xA;&lt;p&gt;This is a simple story content written in markdown format.&lt;/p&gt;&#xA;&lt;h2 id=&#34;chapter-1&#34;&gt;Chapter 1&lt;/h2&gt;&#xA;&lt;p&gt;Once upon a time, in a land of clean code and test-driven development&amp;hellip;&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Story 1</title>
+      <link>https://example.org/stories/story-one/</link>
+      <pubDate>Fri, 26 Sep 2025 12:00:00 +0000</pubDate>
+      <guid>https://example.org/stories/story-one/</guid>
+      <description>&lt;h1 id=&#34;story-number-1&#34;&gt;Story Number 1&lt;/h1&gt;&#xA;&lt;p&gt;This is story number 1 with searchable content.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Story 2</title>
+      <link>https://example.org/stories/story-two/</link>
+      <pubDate>Fri, 26 Sep 2025 12:00:00 +0000</pubDate>
+      <guid>https://example.org/stories/story-two/</guid>
+      <description>&lt;h1 id=&#34;story-number-2&#34;&gt;Story Number 2&lt;/h1&gt;&#xA;&lt;p&gt;This is story number 2 with searchable content.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Story 3</title>
+      <link>https://example.org/stories/story-three/</link>
+      <pubDate>Fri, 26 Sep 2025 12:00:00 +0000</pubDate>
+      <guid>https://example.org/stories/story-three/</guid>
+      <description>&lt;h1 id=&#34;story-number-3&#34;&gt;Story Number 3&lt;/h1&gt;&#xA;&lt;p&gt;This is story number 3 with searchable content.&lt;/p&gt;</description>
+    </item>
+  </channel>
+</rss>

@@ -33,9 +33,24 @@ func NewHugoIntegrationContext() *HugoIntegrationContext {
 	}
 }
 
+// getHugoPath returns the path to the Hugo binary
+// It tries to find the binary relative to the current working directory
+func (h *HugoIntegrationContext) getHugoPath() string {
+	// Try from project root (when running go test ./...)
+	if _, err := os.Stat("bin/hugo"); err == nil {
+		return "bin/hugo"
+	}
+	// Try from features directory (when running test directly)
+	if _, err := os.Stat("../bin/hugo"); err == nil {
+		return "../bin/hugo"
+	}
+	// Default to project root path
+	return "bin/hugo"
+}
+
 func (h *HugoIntegrationContext) hugoIsInstalledAndAvailable() error {
 	// Check if Hugo binary exists
-	hugoPath := filepath.Join("..", "bin", "hugo")
+	hugoPath := h.getHugoPath()
 	if _, err := os.Stat(hugoPath); err != nil {
 		return fmt.Errorf("hugo binary not found at %s", hugoPath)
 	}
@@ -67,7 +82,7 @@ func (h *HugoIntegrationContext) iHaveNoExistingHugoSite() error {
 }
 
 func (h *HugoIntegrationContext) iRunTheHugoSiteCreationCommand() error {
-	hugoPath := filepath.Join("..", "bin", "hugo")
+	hugoPath := h.getHugoPath()
 	cmd := exec.Command(hugoPath, "new", "site", h.siteDirectory, "--force")
 	if err := cmd.Run(); err != nil {
 		h.lastError = err
@@ -438,7 +453,7 @@ func (h *HugoIntegrationContext) iRunTheHugoBuildCommand() error {
 		return fmt.Errorf("failed to write index layout: %v", err)
 	}
 
-	hugoPath := filepath.Join("..", "bin", "hugo")
+	hugoPath := h.getHugoPath()
 	cmd := exec.Command(hugoPath, "-s", h.siteDirectory)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -488,7 +503,7 @@ func (h *HugoIntegrationContext) iHaveABuiltHugoSite() error {
 func (h *HugoIntegrationContext) iStartTheHugoServerOnPort(port string) error {
 	// In tests, we won't actually start the server
 	// Just verify the command would work
-	hugoPath := filepath.Join("..", "bin", "hugo")
+	hugoPath := h.getHugoPath()
 	cmd := exec.Command(hugoPath, "server", "-s", h.siteDirectory, "-p", port, "--help")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("hugo server command not available: %v", err)
