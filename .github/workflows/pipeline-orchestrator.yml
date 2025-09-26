@@ -28,7 +28,9 @@ jobs:
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.name != 'Pipeline Orchestrator')
 
     permissions:
       contents: read
@@ -76,6 +78,13 @@ jobs:
           # Check for stop signal
           if echo "$LABELS" | grep -q "pipeline:stop"; then
             echo "Pipeline stopped by user"
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if another action is already in progress (fixing, reviewing, improving)
+          if echo "$LABELS" | grep -qE "pipeline:(fixing|reviewing|improving)"; then
+            echo "Another pipeline action is already in progress"
             echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -223,10 +232,12 @@ jobs:
 
           case "$NEXT_ACTION" in
             "test")
-              echo "Triggering test workflow..."
-              # The Go CI/CD workflow will trigger automatically on push
-              # Just add a comment for visibility
-              gh pr comment $PR_NUMBER --body "🔄 **Pipeline Status**: Running tests (iteration ${{ steps.state.outputs.CURRENT_ITERATION }})"
+              echo "Tests will run automatically on the next push"
+              # Only add a comment if this is the first test run in an iteration
+              CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
+              if [[ "$CURRENT_ITERATION" -eq "1" ]] || [[ "${{ github.event.workflow_run.name }}" == "Claude Iterative Fix" ]] || [[ "${{ github.event.workflow_run.name }}" == "Claude Code Improvements" ]]; then
+                gh pr comment $PR_NUMBER --body "🔄 **Pipeline Status**: Running tests (iteration $CURRENT_ITERATION)"
+              fi
               ;;
 
             "fix")

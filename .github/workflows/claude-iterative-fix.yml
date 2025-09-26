@@ -13,7 +13,11 @@ jobs:
     if: >
       (github.event_name == 'pull_request') ||
       (github.event_name == 'status' && github.event.state == 'failure') ||
-      (github.event_name == 'check_run' && github.event.check_run.conclusion == 'failure')
+      (github.event_name == 'check_run' &&
+       github.event.check_run.conclusion == 'failure' &&
+       (github.event.check_run.name == 'Test' ||
+        github.event.check_run.name == 'Lint' ||
+        github.event.check_run.name == 'Build'))
 
     permissions:
       contents: write
@@ -37,6 +41,19 @@ jobs:
       - name: Check if fixes are needed
         id: check-status
         run: |
+          # Check if fixing is already in progress
+          if [[ "${{ github.event_name }}" == "check_run" ]] || [[ "${{ github.event_name }}" == "status" ]]; then
+            # For check_run and status events, we need to find the PR first
+            PR_NUMBER_CHECK=$(gh pr list --state open --json number,headRefOid --jq ".[] | select(.headRefOid == \"${{ github.sha }}\") | .number")
+            if [[ -n "$PR_NUMBER_CHECK" ]]; then
+              LABELS=$(gh pr view $PR_NUMBER_CHECK --json labels --jq '.labels[].name' | grep "^pipeline:" || echo "")
+              if echo "$LABELS" | grep -q "pipeline:fixing"; then
+                echo "Fix workflow already in progress, skipping"
+                echo "SHOULD_FIX=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            fi
+          fi
           # Get the PR number and commit SHA
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
