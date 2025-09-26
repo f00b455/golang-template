@@ -143,7 +143,7 @@ func TestRSSHandler_GetTop5_WithLimit(t *testing.T) {
 		{"limit 2", "2", 2},
 		{"limit 3", "3", 3},
 		{"limit 5", "5", 5},
-		{"invalid limit defaults to 5", "10", 5},
+		{"limit 10 returns 6 (all available)", "10", 6},
 		{"invalid string defaults to 5", "abc", 5},
 	}
 

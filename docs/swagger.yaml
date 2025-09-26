@@ -128,12 +128,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: Fetches the top N headlines from SPIEGEL RSS feed (max 5)
+      description: Fetches the top N headlines from SPIEGEL RSS feed (max 200)
       parameters:
       - default: 5
-        description: Number of headlines to fetch (1-5)
+        description: Number of headlines to fetch (1-200)
         in: query
-        maximum: 5
+        maximum: 200
         minimum: 1
         name: limit
         type: integer
