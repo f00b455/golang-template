@@ -52,7 +52,21 @@ func (h *HugoIntegrationContext) hugoIsInstalledAndAvailable() error {
 	// Check if Hugo binary exists
 	hugoPath := h.getHugoPath()
 	if _, err := os.Stat(hugoPath); err != nil {
-		return fmt.Errorf("hugo binary not found at %s", hugoPath)
+		// Try to install Hugo if missing
+		installScript := "scripts/install-hugo.sh"
+		if _, scriptErr := os.Stat(installScript); scriptErr == nil {
+			// Script exists, try to run it
+			installCmd := exec.Command("bash", installScript)
+			if installErr := installCmd.Run(); installErr != nil {
+				return fmt.Errorf("hugo binary not found at %s and installation failed: %v", hugoPath, installErr)
+			}
+			// Check again after installation
+			if _, err := os.Stat(hugoPath); err != nil {
+				return fmt.Errorf("hugo binary still not found at %s after installation attempt", hugoPath)
+			}
+		} else {
+			return fmt.Errorf("hugo binary not found at %s (install with: make install-hugo or bash scripts/install-hugo.sh)", hugoPath)
+		}
 	}
 
 	// Verify Hugo can run

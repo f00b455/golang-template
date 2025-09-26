@@ -55,4 +55,6 @@ site/.hugo_build.lock
 *.hugo_build.lock
 
 # Test Hugo site (generated during BDD tests)
-features/site/
+features/site/public/
+features/site/resources/
+features/site/.hugo_build.lock
