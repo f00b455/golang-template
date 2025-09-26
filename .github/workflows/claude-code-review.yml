@@ -3,6 +3,8 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
+
+run-name: "Claude Code Review #${{ github.event.pull_request.number }}"
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"

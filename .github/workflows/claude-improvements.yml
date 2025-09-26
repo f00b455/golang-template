@@ -20,12 +20,22 @@ jobs:
       - name: Get PR number
         id: pr
         run: |
-          # Get PR number from workflow run
-          SHA="${{ github.event.workflow_run.head_sha }}"
-          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/$SHA/pulls --jq '[0].number' || echo "")
+          # Extract PR number from workflow name (format: "Claude Code Review #123")
+          WORKFLOW_NAME="${{ github.event.workflow_run.display_title }}"
+          echo "Workflow display title: $WORKFLOW_NAME"
+
+          # Extract PR number from workflow name using regex
+          if [[ "$WORKFLOW_NAME" =~ \#([0-9]+) ]]; then
+            PR_NUMBER="${BASH_REMATCH[1]}"
+          else
+            echo "Could not extract PR number from workflow name: $WORKFLOW_NAME"
+            echo "Falling back to SHA-based lookup"
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/$SHA/pulls --jq '[0].number' 2>/dev/null || echo "")
+          fi
 
           if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR found for SHA: $SHA"
+            echo "No PR number found in workflow name or SHA lookup"
             exit 1
           fi
 
