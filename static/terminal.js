@@ -595,15 +595,6 @@
             case ':vim':
                 enableVimMode();
                 break;
-            case ':page':
-                if (args[0]) {
-                    const pageNum = parseInt(args[0]);
-                    navigateToPage(pageNum);
-                    elements.commandInput.value = '';
-                } else {
-                    displaySystemMessage('Usage: :page <number>', 'error');
-                }
-                break;
             case ':first':
                 navigateToPage(1);
                 elements.commandInput.value = '';
