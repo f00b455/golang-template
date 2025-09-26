@@ -32,13 +32,43 @@
     const apiURL = '{{ .Site.Params.apiURL }}';
     const container = document.getElementById('rss-container');
 
+    // HTML escape function to prevent XSS
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return String(unsafe)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Validate and sanitize URL to prevent XSS through href
+    function sanitizeUrl(url) {
+        if (!url) return '#';
+        // Only allow http, https, and relative URLs
+        const allowedProtocols = ['http:', 'https:', '/'];
+        try {
+            if (url.startsWith('/')) return url; // relative URL
+            const parsed = new URL(url);
+            if (allowedProtocols.includes(parsed.protocol)) {
+                return url;
+            }
+        } catch (e) {
+            // Invalid URL
+        }
+        return '#'; // fallback to safe value
+    }
+
     fetch(apiURL + '/api/rss')
         .then(response => response.json())
         .then(data => {
             if (data && data.items) {
                 let html = '<h3>Latest RSS Items</h3><ul>';
                 data.items.slice(0, 10).forEach(item => {
-                    html += '<li><a href="' + item.link + '">' + item.title + '</a></li>';
+                    const safeLink = sanitizeUrl(item.link);
+                    const safeTitle = escapeHtml(item.title);
+                    html += '<li><a href="' + escapeHtml(safeLink) + '">' + safeTitle + '</a></li>';
                 });
                 html += '</ul>';
                 container.innerHTML = html;
