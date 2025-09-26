@@ -420,6 +420,15 @@ func (h *RSSHandler) prepareExportData(filterKeyword string, limit int) ([]share
 	return headlines, nil
 }
 
+// generateExportFilename creates a filename for export with optional filter
+func (h *RSSHandler) generateExportFilename(format, filter string) string {
+	timestamp := time.Now().Format("20060102_150405")
+	if filter != "" {
+		return fmt.Sprintf("rss_export_%s_%s.%s", filter, timestamp, format)
+	}
+	return fmt.Sprintf("rss_export_%s.%s", timestamp, format)
+}
+
 func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
 	format := c.Query("format")
 	if err := h.validateExportFormat(format); err != nil {
@@ -448,21 +457,11 @@ func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
 		return
 	}
 
-	// Generate filename with timestamp
-	timestamp := time.Now().Format("20060102_150405")
-	var filename string
-
+	// Generate filename and export
+	filename := h.generateExportFilename(format, filterKeyword)
 	if format == "json" {
-		filename = fmt.Sprintf("rss_export_%s.json", timestamp)
-		if filterKeyword != "" {
-			filename = fmt.Sprintf("rss_export_%s_%s.json", filterKeyword, timestamp)
-		}
 		h.exportAsJSON(c, headlines, filterKeyword, filename)
 	} else {
-		filename = fmt.Sprintf("rss_export_%s.csv", timestamp)
-		if filterKeyword != "" {
-			filename = fmt.Sprintf("rss_export_%s_%s.csv", filterKeyword, timestamp)
-		}
 		h.exportAsCSV(c, headlines, filename)
 	}
 }
