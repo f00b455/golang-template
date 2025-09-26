@@ -155,7 +155,7 @@ install-tools:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin
 
 # Full validation pipeline (equivalent to npm run validate)
-validate: lint test test-bdd build
+validate: lint test-coverage-check test-bdd build
 	@echo "✅ All validation checks passed!"
 	@echo "🎉 Safe to push to remote repository"
 
@@ -176,6 +176,13 @@ test-cover: deps
 	$(GOTEST) -v -race -coverprofile=coverage.out $(SRC_DIR)
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	$(GOCMD) tool cover -func=coverage.out
+
+# Run tests with coverage and validate threshold (95% minimum for production code)
+test-coverage-check: deps
+	@echo "Running tests with coverage validation..."
+	$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic $(SRC_DIR)
+	@chmod +x scripts/check-coverage.sh
+	@./scripts/check-coverage.sh 95.0 coverage.out
 
 # Auto-fix linting issues where possible
 lint-fix: deps
@@ -266,6 +273,7 @@ help:
 	@echo "🧪 Testing Commands:"
 	@echo "  test               - Run unit tests"
 	@echo "  test-cover         - Run tests with coverage report"
+	@echo "  test-coverage-check - Run tests with 95% coverage validation"
 	@echo "  test-bdd           - Run BDD/Cucumber tests"
 	@echo "  test-pkg PKG=path  - Run tests for specific package"
 	@echo "  bench              - Run benchmarks"
