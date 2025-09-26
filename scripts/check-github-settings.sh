@@ -315,6 +315,8 @@ STANDARD_LABELS=(
     "epic:5319e7:Large feature or collection of features"
     "complex:b60205:Complex implementation requiring significant effort"
     "high-priority:d73a4a:High priority issue that needs immediate attention"
+    "critical:b60205:Critical issue requiring immediate attention"
+    "pipeline:0052cc:Related to CI/CD pipeline workflows"
 )
 
 # Get existing labels

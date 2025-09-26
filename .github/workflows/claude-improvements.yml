@@ -17,20 +17,22 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Get PR number
+      - name: Get PR number from workflow name
         id: pr
         run: |
-          # Get PR number from workflow run
-          SHA="${{ github.event.workflow_run.head_sha }}"
-          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/$SHA/pulls --jq '[0].number' || echo "")
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          echo "Workflow name: $WORKFLOW_NAME"
+
+          # Extract PR number from workflow name pattern: "Title (#123)"
+          PR_NUMBER=$(echo "$WORKFLOW_NAME" | grep -oE '\(#[0-9]+\)' | grep -oE '[0-9]+' | head -1)
 
           if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR found for SHA: $SHA"
+            echo "No PR number found in workflow name: $WORKFLOW_NAME"
             exit 1
           fi
 
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "Found PR #$PR_NUMBER"
+          echo "Found PR #$PR_NUMBER from workflow name"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
