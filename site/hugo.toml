@@ -1,0 +1,34 @@
+baseURL = 'http://localhost:1313/'
+languageCode = 'en-us'
+title = 'Terminal News Reader'
+
+[params]
+  apiURL = 'http://localhost:3002'
+  description = 'A minimal Hugo site with RSS feed integration'
+
+[menu]
+  [[menu.main]]
+    name = 'Home'
+    url = '/'
+    weight = 1
+  [[menu.main]]
+    name = 'Stories'
+    url = '/stories/'
+    weight = 2
+  [[menu.main]]
+    name = 'RSS Feed'
+    url = '/rss/'
+    weight = 3
+  [[menu.main]]
+    name = 'Search'
+    url = '/search/'
+    weight = 4
+
+[outputs]
+  home = ['HTML', 'RSS']
+  section = ['HTML']
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true

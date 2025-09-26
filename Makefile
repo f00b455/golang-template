@@ -62,6 +62,43 @@ dev-web: deps
 	@echo "Running web server in development mode..."
 	$(GOCMD) run $(WEB_DIR)/main.go
 
+# Install Hugo
+install-hugo:
+	@echo "Installing Hugo..."
+	@bash scripts/install-hugo.sh
+
+# Create Hugo site (if not exists)
+hugo-init: install-hugo
+	@if [ ! -f site/hugo.toml ]; then \
+		echo "Creating Hugo site..."; \
+		./bin/hugo new site site --force; \
+	else \
+		echo "Hugo site already exists"; \
+	fi
+
+# Build Hugo site
+hugo-build: install-hugo
+	@echo "Building Hugo site..."
+	./bin/hugo -s site
+
+# Serve Hugo site (port 1313)
+hugo-serve: install-hugo
+	@echo "Starting Hugo server on port 1313..."
+	./bin/hugo server -s site -p 1313
+
+# Run both API server and Hugo server
+dev-full:
+	@echo "Starting both API server (port 3002) and Hugo server (port 1313)..."
+	@trap 'kill %1; kill %2' INT; \
+	$(GOCMD) run $(API_DIR)/main.go & \
+	./bin/hugo server -s site -p 1313 & \
+	wait
+
+# Clean Hugo build
+hugo-clean:
+	@echo "Cleaning Hugo build..."
+	rm -rf site/public/
+
 # Run unit tests
 test: deps
 	@echo "Running unit tests..."
@@ -105,7 +142,7 @@ lint: deps
 
 
 # Clean build artifacts
-clean:
+clean: hugo-clean
 	@echo "Cleaning..."
 	$(GOCLEAN)
 	rm -rf ./bin/
@@ -215,7 +252,16 @@ help:
 	@echo ""
 	@echo "🚀 Development Commands:"
 	@echo "  dev                - Run API server in development mode"
+	@echo "  dev-web            - Run web server in development mode"
+	@echo "  dev-full           - Run both API server and Hugo site concurrently"
 	@echo "  setup              - Setup development environment (install tools + deps)"
+	@echo ""
+	@echo "🌐 Hugo Commands:"
+	@echo "  install-hugo       - Install Hugo binary"
+	@echo "  hugo-init          - Initialize Hugo site (if not exists)"
+	@echo "  hugo-build         - Build Hugo static site"
+	@echo "  hugo-serve         - Serve Hugo site on port 1313"
+	@echo "  hugo-clean         - Clean Hugo build artifacts"
 	@echo ""
 	@echo "🧪 Testing Commands:"
 	@echo "  test               - Run unit tests"

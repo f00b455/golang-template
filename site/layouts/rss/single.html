@@ -1,0 +1,95 @@
+{{ define "title" }}RSS Feed - {{ .Site.Title }}{{ end }}
+
+{{ define "main" }}
+<h1>RSS Feed</h1>
+
+<p>Real-time RSS feed data from the Go API server.</p>
+
+<div id="rss-feed">
+    <p>Loading RSS feed...</p>
+</div>
+
+{{ end }}
+
+{{ define "scripts" }}
+<script>
+(function() {
+    const apiURL = '{{ .Site.Params.apiURL }}';
+    const container = document.getElementById('rss-feed');
+
+    function loadRSSFeed() {
+        fetch(apiURL + '/api/rss')
+            .then(response => response.json())
+            .then(data => {
+                if (data && data.items) {
+                    let html = '<div>';
+                    html += '<p>Total items: ' + data.items.length + '</p>';
+                    html += '<button onclick="exportJSON()">Export as JSON</button> ';
+                    html += '<button onclick="exportCSV()">Export as CSV</button>';
+                    html += '<hr>';
+
+                    data.items.forEach((item, index) => {
+                        html += '<article>';
+                        html += '<h3>' + (index + 1) + '. <a href="' + item.link + '">' + item.title + '</a></h3>';
+                        if (item.description) {
+                            html += '<p>' + item.description + '</p>';
+                        }
+                        if (item.pubDate) {
+                            html += '<p><small>Published: ' + item.pubDate + '</small></p>';
+                        }
+                        html += '</article><hr>';
+                    });
+                    html += '</div>';
+                    container.innerHTML = html;
+
+                    // Store data for export
+                    window.rssData = data;
+                }
+            })
+            .catch(error => {
+                container.innerHTML = '<p>Error loading RSS feed. Please ensure the API server is running on port 3002.</p>';
+                console.error('RSS fetch error:', error);
+            });
+    }
+
+    // Export functions
+    window.exportJSON = function() {
+        if (!window.rssData) return;
+        const dataStr = JSON.stringify(window.rssData, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        const exportLink = document.createElement('a');
+        exportLink.setAttribute('href', dataUri);
+        exportLink.setAttribute('download', 'rss-feed.json');
+        document.body.appendChild(exportLink);
+        exportLink.click();
+        document.body.removeChild(exportLink);
+    };
+
+    window.exportCSV = function() {
+        if (!window.rssData || !window.rssData.items) return;
+
+        let csv = 'Title,Link,Description,Published\n';
+        window.rssData.items.forEach(item => {
+            csv += '"' + (item.title || '').replace(/"/g, '""') + '",';
+            csv += '"' + (item.link || '').replace(/"/g, '""') + '",';
+            csv += '"' + (item.description || '').replace(/"/g, '""') + '",';
+            csv += '"' + (item.pubDate || '').replace(/"/g, '""') + '"\n';
+        });
+
+        const dataUri = 'data:text/csv;charset=utf-8,'+ encodeURIComponent(csv);
+        const exportLink = document.createElement('a');
+        exportLink.setAttribute('href', dataUri);
+        exportLink.setAttribute('download', 'rss-feed.csv');
+        document.body.appendChild(exportLink);
+        exportLink.click();
+        document.body.removeChild(exportLink);
+    };
+
+    // Load RSS feed on page load
+    loadRSSFeed();
+
+    // Refresh every 30 seconds
+    setInterval(loadRSSFeed, 30000);
+})();
+</script>
+{{ end }}

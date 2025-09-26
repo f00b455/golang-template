@@ -1,0 +1,102 @@
+{{ define "title" }}Search - {{ .Site.Title }}{{ end }}
+
+{{ define "main" }}
+<h1>Search</h1>
+
+<form id="search-form">
+    <input type="text" id="search-input" placeholder="Enter search term..." autofocus>
+    <button type="submit">Search</button>
+    <button type="button" onclick="clearSearch()">Clear</button>
+</form>
+
+<div id="search-results">
+    <p>Enter a search term above to search through stories.</p>
+</div>
+
+{{ end }}
+
+{{ define "scripts" }}
+<script>
+// Simple search functionality
+(function() {
+    const searchForm = document.getElementById('search-form');
+    const searchInput = document.getElementById('search-input');
+    const resultsContainer = document.getElementById('search-results');
+
+    // Build search index from page data
+    const searchIndex = [
+        {{ range where .Site.RegularPages "Section" "stories" }}
+        {
+            title: {{ .Title | jsonify }},
+            url: {{ .Permalink | jsonify }},
+            content: {{ .Plain | jsonify }},
+            date: {{ .Date.Format "2006-01-02" | jsonify }}
+        },
+        {{ end }}
+    ];
+
+    function performSearch(query) {
+        if (!query) {
+            resultsContainer.innerHTML = '<p>Enter a search term above to search through stories.</p>';
+            return;
+        }
+
+        const lowerQuery = query.toLowerCase();
+        const results = searchIndex.filter(item => {
+            return item.title.toLowerCase().includes(lowerQuery) ||
+                   item.content.toLowerCase().includes(lowerQuery);
+        });
+
+        if (results.length === 0) {
+            resultsContainer.innerHTML = '<p>No results found for: <strong>' + query + '</strong></p>';
+        } else {
+            let html = '<p>Found ' + results.length + ' result(s) for: <strong>' + query + '</strong></p>';
+            html += '<ul>';
+            results.forEach(item => {
+                html += '<li>';
+                html += '<a href="' + item.url + '">' + item.title + '</a>';
+                html += ' - ' + item.date;
+
+                // Show snippet with highlighted search term
+                const contentSnippet = getSnippet(item.content, lowerQuery);
+                if (contentSnippet) {
+                    html += '<br><small>' + contentSnippet + '</small>';
+                }
+                html += '</li>';
+            });
+            html += '</ul>';
+            resultsContainer.innerHTML = html;
+        }
+    }
+
+    function getSnippet(content, query) {
+        const index = content.toLowerCase().indexOf(query);
+        if (index === -1) return '';
+
+        const start = Math.max(0, index - 50);
+        const end = Math.min(content.length, index + query.length + 50);
+        let snippet = content.substring(start, end);
+
+        if (start > 0) snippet = '...' + snippet;
+        if (end < content.length) snippet = snippet + '...';
+
+        // Highlight the search term
+        const regex = new RegExp(query, 'gi');
+        snippet = snippet.replace(regex, '<strong>$&</strong>');
+
+        return snippet;
+    }
+
+    searchForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        performSearch(searchInput.value.trim());
+    });
+
+    window.clearSearch = function() {
+        searchInput.value = '';
+        resultsContainer.innerHTML = '<p>Enter a search term above to search through stories.</p>';
+        searchInput.focus();
+    };
+})();
+</script>
+{{ end }}
