@@ -1,0 +1,180 @@
+name: Claude Code Improvements
+
+on:
+  workflow_run:
+    workflows: ["Claude Iterative Fix"]
+    types:
+      - completed
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+
+jobs:
+  improve-code:
+    runs-on: ubuntu-latest
+    # Only run after iterative fix succeeds, or on review comments
+    if: >
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, 'improve:')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, 'improve:'))
+
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+      actions: read
+      id-token: write
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.head_ref || github.ref }}
+
+      - name: Wait for other workflows to complete
+        run: |
+          echo "Waiting to ensure no parallel execution with iterative fix..."
+          sleep 10
+
+          # Check if iterative fix is running
+          RUNNING_WORKFLOWS=$(gh api repos/${{ github.repository }}/actions/runs --jq '.workflow_runs[] | select(.status == "in_progress" and .name == "Claude Iterative Fix") | .id')
+
+          if [[ -n "$RUNNING_WORKFLOWS" ]]; then
+            echo "Claude Iterative Fix is still running. Waiting for completion..."
+            for workflow_id in $RUNNING_WORKFLOWS; do
+              gh run watch $workflow_id --exit-status || true
+            done
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for improvement opportunities
+        id: check-improvements
+        run: |
+          # Get PR number
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            # Extract PR number from workflow run
+            PR_NUMBER=$(gh api ${{ github.event.workflow_run.pull_requests_url }} --jq '.[0].number' || echo "")
+          elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER="${{ github.event.issue.number }}"
+          fi
+
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No PR found, skipping"
+            echo "SHOULD_IMPROVE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if all required checks are passing
+          COMMIT_SHA=$(gh pr view $PR_NUMBER --json headRefOid --jq '.headRefOid')
+          FAILING_CHECKS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.statuses[] | select(.state == "failure" or .state == "error") | .context' | wc -l)
+
+          if [[ $FAILING_CHECKS -gt 0 ]]; then
+            echo "There are still failing checks. Iterative fix should handle this first."
+            echo "SHOULD_IMPROVE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Look for Claude's review comments with improvement suggestions
+          REVIEW_COMMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "claude" and (.body | contains("Issues & Recommendations") or contains("Required Actions Before Merge")))] | length')
+
+          if [[ $REVIEW_COMMENTS -gt 0 ]]; then
+            echo "Found Claude review with improvement suggestions"
+            echo "SHOULD_IMPROVE=true" >> $GITHUB_OUTPUT
+          else
+            echo "No improvement suggestions found"
+            echo "SHOULD_IMPROVE=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get improvement count
+        id: get-improvement
+        if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true'
+        run: |
+          PR_NUMBER="${{ steps.check-improvements.outputs.PR_NUMBER }}"
+
+          # Count existing improvement comments
+          IMPROVEMENT_COUNT=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.body | contains("🔧 Code Improvement Iteration"))] | length')
+          NEXT_IMPROVEMENT=$((IMPROVEMENT_COUNT + 1))
+
+          echo "ITERATION=$NEXT_IMPROVEMENT" >> $GITHUB_OUTPUT
+
+          # Stop after 3 improvement iterations
+          if [[ $NEXT_IMPROVEMENT -gt 3 ]]; then
+            echo "MAX_ITERATIONS_REACHED=true" >> $GITHUB_OUTPUT
+          else
+            echo "MAX_ITERATIONS_REACHED=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Claude Code for improvements
+        if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'false'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            🔧 Code Improvement Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3 - Implementing review suggestions
+
+            This PR has passing tests but code review identified improvements needed. Please implement the suggested improvements from the code review.
+
+            1. **Review the Claude code review comments** to understand what improvements are needed:
+               - Use `gh pr view ${{ steps.check-improvements.outputs.PR_NUMBER }} --json comments` to see all comments
+               - Focus on comments from Claude that contain specific improvement suggestions
+               - Pay attention to sections like "Issues & Recommendations" and "Required Actions Before Merge"
+
+            2. **Implement the improvements** in priority order:
+               - Security issues (missing headers, validation, etc.)
+               - Performance improvements (buffering, caching, etc.)
+               - Error handling improvements
+               - Code quality improvements (refactoring, documentation)
+
+            3. **Validate your changes** after each improvement:
+               - Run `make lint && make test && make build` to ensure nothing breaks
+               - Only commit if all checks still pass
+
+            4. **Commit improvements** with clear messages:
+               ```
+               git add [files]
+               git commit -m "improve: [specific improvement] based on review feedback"
+               git push
+               ```
+
+            5. **Report your improvements** with a PR comment including:
+               - What improvements were implemented
+               - What suggestions were deferred and why
+               - Current code quality status
+
+            **Important constraints:**
+            - Only implement improvements that maintain backward compatibility
+            - Don't change the API interface unless specifically requested
+            - Preserve all existing tests
+            - Focus on the highest-impact improvements first
+            - If an improvement is too risky or complex, document it for manual review
+
+            Use `gh pr comment ${{ steps.check-improvements.outputs.PR_NUMBER }}` to report your progress.
+
+          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*),Bash(sed:*)"'
+
+      - name: Comment on max improvements reached
+        if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'true'
+        run: |
+          gh pr comment ${{ steps.check-improvements.outputs.PR_NUMBER }} --body "
+          🔧 **Code Improvement Max Iterations Reached**
+
+          After 3 improvement iterations, further enhancements should be reviewed manually.
+
+          The code should now be in good shape with critical issues addressed.
+          Please review the changes and decide if any remaining suggestions need manual implementation.
+          "
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
