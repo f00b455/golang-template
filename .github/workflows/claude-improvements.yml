@@ -130,33 +130,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Report improvements needed
+      - name: Run Claude Code for improvements
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'false'
-        run: |
-          PR_NUMBER="${{ steps.check-improvements.outputs.PR_NUMBER }}"
+        timeout-minutes: 10
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            🔧 Code Improvement Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3 - Implementing review suggestions
 
-          # Get the specific improvements from Claude's review
-          IMPROVEMENTS=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.author.login == "claude" and .body | contains("Required Actions Before Merge"))] | .[0].body' | grep -A 20 "Required Actions Before Merge" || echo "No specific improvements found")
+            The code review identified specific improvements. Please implement ONLY the high-priority security fixes:
 
-          gh pr comment $PR_NUMBER --body "## 🔧 Code Improvements Needed (Iteration ${{ steps.get-improvement.outputs.ITERATION }}/3)
+            1. Add CSV injection protection by sanitizing CSV values
+            2. Add maximum export limit validation (max 1000 items)
+            3. Add security headers to export endpoints
 
-          The code review identified improvements that should be implemented.
+            Make minimal, focused changes. Run tests after each change to ensure nothing breaks.
 
-          ### Status:
-          - ✅ All tests are passing
-          - ⚠️ Claude Code automatic implementation is disabled due to timeout issues
-          - 📝 Manual implementation required
+            Use these commands:
+            - make lint && make test
+            - git add -A && git commit -m "improve: add security fixes from code review" && git push
 
-          ### Review Findings:
-          \`\`\`
-          $IMPROVEMENTS
-          \`\`\`
+            Report completion with: gh pr comment ${{ steps.check-improvements.outputs.PR_NUMBER }} --body "✅ Security improvements implemented"
 
-          ### Next Steps:
-          Please implement the improvements manually or trigger the workflow with specific instructions.
-          "
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*)"'
 
       - name: Comment on max improvements reached
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'true'
