@@ -109,19 +109,24 @@ jobs:
           IMPROVEMENT_COUNT=$(gh pr view $PR_NUMBER --json comments --jq '[.comments[] | select(.body | contains("🔧 Code Improvement Iteration"))] | length')
           NEXT_IMPROVEMENT=$((IMPROVEMENT_COUNT + 1))
 
+          echo "Current improvement count: $IMPROVEMENT_COUNT"
+          echo "Next iteration will be: $NEXT_IMPROVEMENT"
           echo "ITERATION=$NEXT_IMPROVEMENT" >> $GITHUB_OUTPUT
 
           # Stop after 3 improvement iterations
           if [[ $NEXT_IMPROVEMENT -gt 3 ]]; then
             echo "MAX_ITERATIONS_REACHED=true" >> $GITHUB_OUTPUT
+            echo "Maximum iterations reached, will skip Claude Code"
           else
             echo "MAX_ITERATIONS_REACHED=false" >> $GITHUB_OUTPUT
+            echo "Will proceed with Claude Code for iteration $NEXT_IMPROVEMENT"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Claude Code for improvements
         if: steps.check-improvements.outputs.SHOULD_IMPROVE == 'true' && steps.get-improvement.outputs.MAX_ITERATIONS_REACHED == 'false'
+        timeout-minutes: 10  # Add timeout to prevent hanging
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
