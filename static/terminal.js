@@ -30,7 +30,9 @@
         totalPages: 1,
         isLoading: false,
         virtualScrollTop: 0,
-        visibleRange: { start: 0, end: CONFIG.ITEMS_PER_PAGE }
+        visibleRange: { start: 0, end: CONFIG.ITEMS_PER_PAGE },
+        virtualScrollEnabled: false,
+        itemHeight: 80 // Estimated height per item in pixels
     };
 
     // DOM Elements
@@ -95,6 +97,13 @@
 
         // Auto-refresh
         setInterval(loadRSSFeed, CONFIG.REFRESH_INTERVAL);
+
+        // Handle window resize for virtual scrolling
+        window.addEventListener('resize', () => {
+            if (state.virtualScrollEnabled) {
+                renderRSSItems();
+            }
+        });
     }
 
     function initializeTerminal() {
@@ -156,6 +165,67 @@
         }
     }
 
+    // Pagination functions
+    function updatePagination() {
+        const items = state.filteredItems.length > 0 ? state.filteredItems : state.rssItems;
+        state.totalPages = Math.ceil(items.length / CONFIG.ITEMS_PER_PAGE);
+
+        // Ensure current page is valid
+        if (state.currentPage > state.totalPages) {
+            state.currentPage = Math.max(1, state.totalPages);
+        }
+    }
+
+    function updatePaginationStatus() {
+        const items = state.filteredItems.length > 0 ? state.filteredItems : state.rssItems;
+        const startItem = (state.currentPage - 1) * CONFIG.ITEMS_PER_PAGE + 1;
+        const endItem = Math.min(state.currentPage * CONFIG.ITEMS_PER_PAGE, items.length);
+
+        // Update status bar with pagination info
+        if (elements.position) {
+            const statusText = items.length > CONFIG.ITEMS_PER_PAGE ?
+                `${startItem}-${endItem} of ${items.length} | Page ${state.currentPage}/${state.totalPages}` :
+                `${items.length} items`;
+            elements.position.textContent = statusText;
+        }
+    }
+
+    function navigateToPage(pageNum) {
+        if (pageNum < 1 || pageNum > state.totalPages) {
+            displaySystemMessage(`Invalid page number. Valid range: 1-${state.totalPages}`, 'error');
+            return;
+        }
+
+        state.currentPage = pageNum;
+        renderRSSItems();
+        displaySystemMessage(`Navigated to page ${pageNum}`);
+    }
+
+    // Add loading indicator functions
+    function displayLoadingIndicator(show) {
+        if (show) {
+            state.isLoading = true;
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'loading-indicator';
+            loadingDiv.className = 'loading-indicator';
+            loadingDiv.innerHTML = `
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading ${CONFIG.MAX_ITEMS} news items...</div>
+                <div class="loading-progress"></div>
+            `;
+
+            if (elements.rssContainer && !document.getElementById('loading-indicator')) {
+                elements.rssContainer.parentNode.insertBefore(loadingDiv, elements.rssContainer);
+            }
+        } else {
+            state.isLoading = false;
+            const loadingDiv = document.getElementById('loading-indicator');
+            if (loadingDiv) {
+                loadingDiv.remove();
+            }
+        }
+    }
+
     function processRSSData(data) {
         // Handle different API response formats
         if (data.headlines) {
@@ -176,13 +246,31 @@
 
     function renderRSSItems() {
         const container = elements.rssContainer;
-        container.innerHTML = '';
-
         const itemsToRender = state.filteredItems.length > 0 ?
             state.filteredItems : state.rssItems;
 
-        itemsToRender.forEach((item, index) => {
-            const article = createRSSElement(item, index);
+        // Enable virtual scrolling for large datasets
+        if (itemsToRender.length > 100) {
+            renderVirtualScrollItems(container, itemsToRender);
+        } else {
+            renderPaginatedItems(container, itemsToRender);
+        }
+
+        updatePosition();
+        updatePaginationStatus();
+    }
+
+    function renderPaginatedItems(container, items) {
+        container.innerHTML = '';
+
+        // Calculate pagination
+        const startIndex = (state.currentPage - 1) * CONFIG.ITEMS_PER_PAGE;
+        const endIndex = Math.min(startIndex + CONFIG.ITEMS_PER_PAGE, items.length);
+        const pageItems = items.slice(startIndex, endIndex);
+
+        pageItems.forEach((item, index) => {
+            const globalIndex = startIndex + index;
+            const article = createRSSElement(item, globalIndex);
             container.appendChild(article);
 
             // Stagger animation
@@ -190,8 +278,73 @@
                 article.style.opacity = '1';
             }, index * 50);
         });
+    }
 
-        updatePosition();
+    function renderVirtualScrollItems(container, items) {
+        // Clear and setup virtual scroll container
+        container.innerHTML = '';
+        container.style.position = 'relative';
+        container.style.overflowY = 'auto';
+        container.style.height = '600px'; // Fixed height for virtual scroll
+
+        // Create spacer for total height
+        const totalHeight = items.length * state.itemHeight;
+        const spacer = document.createElement('div');
+        spacer.style.height = `${totalHeight}px`;
+        spacer.style.position = 'relative';
+        container.appendChild(spacer);
+
+        // Create viewport for visible items
+        const viewport = document.createElement('div');
+        viewport.style.position = 'absolute';
+        viewport.style.top = '0';
+        viewport.style.left = '0';
+        viewport.style.right = '0';
+        spacer.appendChild(viewport);
+
+        // Render initial visible items
+        updateVirtualScroll(container, viewport, items);
+
+        // Add scroll listener for virtual scrolling
+        container.onscroll = () => {
+            requestAnimationFrame(() => {
+                updateVirtualScroll(container, viewport, items);
+            });
+        };
+
+        state.virtualScrollEnabled = true;
+    }
+
+    function updateVirtualScroll(container, viewport, items) {
+        const scrollTop = container.scrollTop;
+        const containerHeight = container.clientHeight;
+
+        // Calculate visible range with buffer
+        const startIndex = Math.max(0, Math.floor(scrollTop / state.itemHeight) - CONFIG.VIRTUAL_SCROLL_BUFFER);
+        const endIndex = Math.min(
+            items.length,
+            Math.ceil((scrollTop + containerHeight) / state.itemHeight) + CONFIG.VIRTUAL_SCROLL_BUFFER
+        );
+
+        // Only re-render if range changed significantly
+        if (Math.abs(state.visibleRange.start - startIndex) > 1 ||
+            Math.abs(state.visibleRange.end - endIndex) > 1) {
+
+            state.visibleRange = { start: startIndex, end: endIndex };
+
+            // Clear viewport and render visible items
+            viewport.innerHTML = '';
+
+            for (let i = startIndex; i < endIndex; i++) {
+                const item = items[i];
+                const article = createRSSElement(item, i);
+                article.style.position = 'absolute';
+                article.style.top = `${i * state.itemHeight}px`;
+                article.style.left = '0';
+                article.style.right = '0';
+                viewport.appendChild(article);
+            }
+        }
     }
 
     function createRSSElement(item, index) {
@@ -253,6 +406,9 @@
             elements.filterStatus.textContent = `Filter: "${query}" (${state.filteredItems.length} matches)`;
         }
 
+        // Reset to first page when filtering
+        state.currentPage = 1;
+        updatePagination();
         renderRSSItems();
     }
 
@@ -350,6 +506,15 @@
             case ':vim':
                 enableVimMode();
                 break;
+            case ':page':
+                if (args[0]) {
+                    const pageNum = parseInt(args[0]);
+                    navigateToPage(pageNum);
+                    elements.commandInput.value = '';
+                } else {
+                    displaySystemMessage('Usage: :page <number>', 'error');
+                }
+                break;
             default:
                 displaySystemMessage(`Unknown command: ${cmd}`, 'error');
         }
@@ -367,6 +532,7 @@ Available Commands:
   :export json  - Export as JSON format
   :export csv   - Export as CSV format
   :vim          - Toggle vim keybindings
+  :page <num>   - Jump to specific page
 
 Filter Syntax:
   word      - Include items containing 'word'
@@ -381,7 +547,9 @@ Keyboard Shortcuts:
   /         - Focus search
   Enter     - Open selected item
   Escape    - Clear filter
-  Tab       - Autocomplete`;
+  Tab       - Autocomplete
+  PageDown  - Next page
+  PageUp    - Previous page`;
 
         displaySystemMessage(helpText);
         elements.commandInput.value = '';
@@ -662,6 +830,18 @@ Statistics:
             case 'Enter':
                 e.preventDefault();
                 openSelectedItem();
+                break;
+            case 'PageDown':
+                e.preventDefault();
+                if (state.currentPage < state.totalPages) {
+                    navigateToPage(state.currentPage + 1);
+                }
+                break;
+            case 'PageUp':
+                e.preventDefault();
+                if (state.currentPage > 1) {
+                    navigateToPage(state.currentPage - 1);
+                }
                 break;
         }
     }
