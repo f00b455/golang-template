@@ -406,93 +406,135 @@ Statistics:
         elements.commandInput.value = '';
     }
 
-    async function exportDataFormat(format) {
+    // Constants for export functionality
+    const EXPORT_STATUS_TIMEOUT = 3000; // ms
+    const MAX_FILTER_LENGTH_DISPLAY = 20; // characters for filename
+    const MAX_FILTER_LENGTH = 100; // max filter length
+    let exportStatusTimeout = null;
+
+    // Pure function for filename generation
+    function generateExportFilename(format, filter, timestamp) {
+        const base = `rss-export-${timestamp}.${format}`;
+        if (!filter) return base;
+
+        const sanitized = filter.replace(/[^a-z0-9]/gi, '_').substring(0, MAX_FILTER_LENGTH_DISPLAY);
+        return base.replace(`.${format}`, `-${sanitized}.${format}`);
+    }
+
+    // Build export URL with parameters
+    function buildExportUrl(format, limit) {
+        const url = new URL(CONFIG.EXPORT_ENDPOINT, window.location.origin);
+        url.searchParams.append('format', format);
+
+        // Validate limit parameter
+        if (limit > 0 && limit <= CONFIG.MAX_ITEMS) {
+            url.searchParams.append('limit', limit);
+        }
+
+        return url;
+    }
+
+    // Extract filename from Content-Disposition header
+    function extractFilename(contentDisposition, defaultFilename) {
+        if (!contentDisposition) return defaultFilename;
+
+        // More defensive parsing of Content-Disposition
         try {
-            // Show exporting status
-            updateExportStatus('Exporting...', 'success');
+            const filenameMatch = contentDisposition.match(/filename="?([^"\n\r;]+)"?/);
+            return filenameMatch ? filenameMatch[1] : defaultFilename;
+        } catch (e) {
+            return defaultFilename;
+        }
+    }
 
-            // Disable buttons during export
-            elements.exportJsonBtn.disabled = true;
-            elements.exportCsvBtn.disabled = true;
+    // Trigger file download
+    function triggerDownload(blob, filename) {
+        const downloadUrl = URL.createObjectURL(blob);
 
-            // Get current filter from input
-            const filterValue = elements.commandInput.value;
-            const hasFilter = filterValue && !filterValue.startsWith(':');
-
-            // Determine items to export
-            const itemsToExport = hasFilter ? state.filteredItems : state.rssItems;
-
-            // Build URL with query params
-            const url = new URL(CONFIG.EXPORT_ENDPOINT, window.location.origin);
-            url.searchParams.append('format', format);
-
-            // If we have items to export, include limit
-            if (itemsToExport.length > 0) {
-                url.searchParams.append('limit', itemsToExport.length);
-            }
-
-            // Make API call
-            const response = await fetch(url.toString());
-
-            if (!response.ok) {
-                throw new Error(`Export failed: ${response.status}`);
-            }
-
-            // Get filename from Content-Disposition header or generate one
-            const contentDisposition = response.headers.get('Content-Disposition');
-            let filename = `rss-export-${Date.now()}.${format}`;
-
-            if (contentDisposition) {
-                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(?:;|$)/);
-                if (filenameMatch) {
-                    filename = filenameMatch[1];
-                }
-            }
-
-            // Add filter to filename if present
-            if (hasFilter) {
-                const sanitizedFilter = filterValue.replace(/[^a-z0-9]/gi, '_').substring(0, 20);
-                filename = filename.replace(`.${format}`, `-${sanitizedFilter}.${format}`);
-            }
-
-            // Get blob from response
-            const blob = await response.blob();
-
-            // Create download link
-            const downloadUrl = URL.createObjectURL(blob);
+        try {
             const a = document.createElement('a');
             a.href = downloadUrl;
             a.download = filename;
-
-            // Trigger download
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-
-            // Clean up
+        } finally {
+            // Ensure cleanup even if download fails
             URL.revokeObjectURL(downloadUrl);
+        }
+    }
 
-            // Show success message
-            const message = hasFilter ?
-                `Exported ${itemsToExport.length} filtered items as ${format.toUpperCase()}` :
-                `Exported ${itemsToExport.length} items as ${format.toUpperCase()}`;
+    // Clear export status with proper timeout management
+    function clearExportStatusDelayed() {
+        // Cancel any existing timeout
+        if (exportStatusTimeout) {
+            clearTimeout(exportStatusTimeout);
+        }
 
+        exportStatusTimeout = setTimeout(() => {
+            updateExportStatus('', '');
+            exportStatusTimeout = null;
+        }, EXPORT_STATUS_TIMEOUT);
+    }
+
+    // Main export function (refactored to under 60 lines)
+    async function exportDataFormat(format) {
+        let downloadUrl = null;
+
+        try {
+            // Validate format parameter
+            if (!['json', 'csv'].includes(format)) {
+                throw new Error('Invalid export format');
+            }
+
+            updateExportStatus('Exporting...', 'success');
+            elements.exportJsonBtn.disabled = true;
+            elements.exportCsvBtn.disabled = true;
+
+            // Get and validate filter
+            const filterValue = elements.commandInput.value;
+            const hasFilter = filterValue && !filterValue.startsWith(':');
+
+            if (hasFilter && filterValue.length > MAX_FILTER_LENGTH) {
+                throw new Error(`Filter too long (max ${MAX_FILTER_LENGTH} characters)`);
+            }
+
+            const itemsToExport = hasFilter ? state.filteredItems : state.rssItems;
+            const url = buildExportUrl(format, itemsToExport.length);
+
+            // Make API call with better error handling
+            const response = await fetch(url.toString());
+
+            if (!response.ok) {
+                const errorMsg = response.status === 503 ? 'Service temporarily unavailable' :
+                                response.status === 400 ? 'Invalid export parameters' :
+                                `Export failed (${response.status})`;
+                throw new Error(errorMsg);
+            }
+
+            // Process response
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('Content-Disposition');
+            const defaultFilename = generateExportFilename(format, hasFilter ? filterValue : null, Date.now());
+            const filename = extractFilename(contentDisposition, defaultFilename);
+
+            // Trigger download
+            triggerDownload(blob, filename);
+
+            // Show success
+            const message = `Exported ${itemsToExport.length}${hasFilter ? ' filtered' : ''} items as ${format.toUpperCase()}`;
             updateExportStatus(message, 'success');
             displaySystemMessage(message);
 
         } catch (error) {
             console.error('Export failed:', error);
-            updateExportStatus(`Export failed: ${error.message}`, 'error');
-            displaySystemMessage(`Export failed: ${error.message}`, 'error');
+            const errorMsg = error.message || 'Unknown error occurred';
+            updateExportStatus(`Export failed: ${errorMsg}`, 'error');
+            displaySystemMessage(`Export failed: ${errorMsg}`, 'error');
         } finally {
-            // Re-enable buttons
             elements.exportJsonBtn.disabled = false;
             elements.exportCsvBtn.disabled = false;
-
-            // Clear status after 3 seconds
-            setTimeout(() => {
-                updateExportStatus('', '');
-            }, 3000);
+            clearExportStatusDelayed();
         }
     }
 
@@ -540,6 +582,9 @@ Statistics:
         }
     }
 
+    // Track export key listener to prevent stacking
+    let exportKeyListener = null;
+
     function handleGlobalKeys(e) {
         // Skip if input is focused
         if (document.activeElement === elements.commandInput) return;
@@ -547,16 +592,40 @@ Statistics:
         // Handle Ctrl+E shortcuts for export
         if (e.ctrlKey && e.key === 'e') {
             e.preventDefault();
-            // Wait for next key
-            const handleExportKey = (evt) => {
-                if (evt.key === 'j') {
+
+            // Clean up any existing listener
+            if (exportKeyListener) {
+                document.removeEventListener('keydown', exportKeyListener);
+                clearTimeout(exportKeyListener.timeoutId);
+            }
+
+            // Create new listener with timeout
+            exportKeyListener = (evt) => {
+                if (evt.key === 'j' || evt.key === 'J') {
                     exportDataFormat('json');
-                } else if (evt.key === 'c') {
+                    displaySystemMessage('Exporting as JSON...');
+                } else if (evt.key === 'c' || evt.key === 'C') {
                     exportDataFormat('csv');
+                    displaySystemMessage('Exporting as CSV...');
+                } else {
+                    displaySystemMessage('Export cancelled');
                 }
-                document.removeEventListener('keydown', handleExportKey);
+
+                document.removeEventListener('keydown', exportKeyListener);
+                clearTimeout(exportKeyListener.timeoutId);
+                exportKeyListener = null;
             };
-            document.addEventListener('keydown', handleExportKey);
+
+            // Auto-cancel after 3 seconds
+            exportKeyListener.timeoutId = setTimeout(() => {
+                if (exportKeyListener) {
+                    document.removeEventListener('keydown', exportKeyListener);
+                    exportKeyListener = null;
+                    displaySystemMessage('Export mode cancelled (timeout)');
+                }
+            }, 3000);
+
+            document.addEventListener('keydown', exportKeyListener);
             displaySystemMessage('Export mode: Press J for JSON, C for CSV');
             return;
         }
