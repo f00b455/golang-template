@@ -1,9 +1,7 @@
 package features
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -37,7 +35,7 @@ func NewHugoIntegrationContext() *HugoIntegrationContext {
 
 func (h *HugoIntegrationContext) hugoIsInstalledAndAvailable() error {
 	// Check if Hugo binary exists
-	hugoPath := filepath.Join("bin", "hugo")
+	hugoPath := filepath.Join("..", "bin", "hugo")
 	if _, err := os.Stat(hugoPath); err != nil {
 		return fmt.Errorf("hugo binary not found at %s", hugoPath)
 	}
@@ -69,7 +67,7 @@ func (h *HugoIntegrationContext) iHaveNoExistingHugoSite() error {
 }
 
 func (h *HugoIntegrationContext) iRunTheHugoSiteCreationCommand() error {
-	hugoPath := filepath.Join("bin", "hugo")
+	hugoPath := filepath.Join("..", "bin", "hugo")
 	cmd := exec.Command(hugoPath, "new", "site", h.siteDirectory, "--force")
 	if err := cmd.Run(); err != nil {
 		h.lastError = err
@@ -210,7 +208,7 @@ func (h *HugoIntegrationContext) theGoAPIIsRunningOnPort(port string) error {
 		h.apiRunning = false
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	h.apiRunning = resp.StatusCode == http.StatusOK
 	return nil
@@ -254,7 +252,7 @@ func (h *HugoIntegrationContext) iFetchRSSDataFromTheAPIEndpoint(endpoint string
 	if err != nil {
 		return fmt.Errorf("failed to fetch RSS data: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("API returned status %d", resp.StatusCode)
@@ -342,8 +340,9 @@ layout: "search"
 	return nil
 }
 
-func (h *HugoIntegrationContext) iSearchForASpecificTerm(term string) error {
-	// Simulate search functionality
+func (h *HugoIntegrationContext) iSearchForASpecificTerm() error {
+	// Simulate search functionality with a default term
+	term := "story"
 	h.searchResults = []string{}
 
 	// In a real implementation, this would search through content
@@ -390,7 +389,29 @@ func (h *HugoIntegrationContext) iHaveAConfiguredHugoSiteWithContent() error {
 }
 
 func (h *HugoIntegrationContext) iRunTheHugoBuildCommand() error {
-	hugoPath := filepath.Join("bin", "hugo")
+	// Create a minimal index layout to ensure Hugo generates output
+	layoutDir := filepath.Join(h.siteDirectory, "layouts")
+	if err := os.MkdirAll(layoutDir, 0755); err != nil {
+		return fmt.Errorf("failed to create layouts directory: %v", err)
+	}
+
+	indexLayout := `<!DOCTYPE html>
+<html>
+<head><title>{{ .Site.Title }}</title></head>
+<body>
+<h1>Hugo Site</h1>
+{{ range .Site.RegularPages }}
+  <h2>{{ .Title }}</h2>
+{{ end }}
+</body>
+</html>`
+
+	indexPath := filepath.Join(layoutDir, "index.html")
+	if err := os.WriteFile(indexPath, []byte(indexLayout), 0644); err != nil {
+		return fmt.Errorf("failed to write index layout: %v", err)
+	}
+
+	hugoPath := filepath.Join("..", "bin", "hugo")
 	cmd := exec.Command(hugoPath, "-s", h.siteDirectory)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -440,7 +461,7 @@ func (h *HugoIntegrationContext) iHaveABuiltHugoSite() error {
 func (h *HugoIntegrationContext) iStartTheHugoServerOnPort(port string) error {
 	// In tests, we won't actually start the server
 	// Just verify the command would work
-	hugoPath := filepath.Join("bin", "hugo")
+	hugoPath := filepath.Join("..", "bin", "hugo")
 	cmd := exec.Command(hugoPath, "server", "-s", h.siteDirectory, "-p", port, "--help")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("hugo server command not available: %v", err)
