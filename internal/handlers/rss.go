@@ -385,18 +385,46 @@ func (h *RSSHandler) filterHeadlines(headlines []shared.RssHeadline, keyword str
 // @Failure      400      {object}  ErrorResponse
 // @Failure      503      {object}  ErrorResponse
 // @Router       /rss/spiegel/export [get]
-func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
-	format := c.Query("format")
+// validateExportFormat checks if the export format is valid
+func (h *RSSHandler) validateExportFormat(format string) error {
 	if format == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "missing format parameter",
-		})
-		return
+		return fmt.Errorf("missing format parameter")
+	}
+	if format != "json" && format != "csv" {
+		return fmt.Errorf("invalid format parameter: must be 'json' or 'csv'")
+	}
+	return nil
+}
+
+// prepareExportData fetches and filters headlines for export
+func (h *RSSHandler) prepareExportData(filterKeyword string, limit int) ([]shared.RssHeadline, error) {
+	headlines, _ := h.getCachedHeadlines()
+	if headlines == nil {
+		var err error
+		headlines, err = h.fetchAndCacheHeadlines()
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if format != "json" && format != "csv" {
+	// Apply filter
+	if filterKeyword != "" {
+		headlines = h.filterHeadlines(headlines, filterKeyword)
+	}
+
+	// Apply limit
+	if limit > 0 && len(headlines) > limit {
+		headlines = headlines[:limit]
+	}
+
+	return headlines, nil
+}
+
+func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
+	format := c.Query("format")
+	if err := h.validateExportFormat(format); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "invalid format parameter: must be 'json' or 'csv'",
+			Error: err.Error(),
 		})
 		return
 	}
@@ -411,27 +439,13 @@ func (h *RSSHandler) ExportHeadlines(c *gin.Context) {
 
 	limit := h.parseExportLimit(c)
 
-	// Get headlines from cache or fetch
-	headlines, _ := h.getCachedHeadlines()
-	if headlines == nil {
-		var err error
-		headlines, err = h.fetchAndCacheHeadlines()
-		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, ErrorResponse{
-				Error: "Unable to fetch RSS feed",
-			})
-			return
-		}
-	}
-
-	// Apply filter
-	if filterKeyword != "" {
-		headlines = h.filterHeadlines(headlines, filterKeyword)
-	}
-
-	// Apply limit
-	if limit > 0 && len(headlines) > limit {
-		headlines = headlines[:limit]
+	// Prepare data for export
+	headlines, err := h.prepareExportData(filterKeyword, limit)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
+			Error: "Unable to fetch RSS feed",
+		})
+		return
 	}
 
 	// Generate filename with timestamp
