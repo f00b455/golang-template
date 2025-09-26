@@ -30,6 +30,8 @@ const (
 	maxReturnItems = 5
 	// maxFilterLength is the maximum allowed length for filter parameters to prevent DoS
 	maxFilterLength = 100
+	// maxExportItems is the maximum number of items allowed in export to prevent resource exhaustion
+	maxExportItems = 1000
 )
 
 // RSSHandler handles RSS-related requests.
@@ -466,14 +468,22 @@ func (h *RSSHandler) exportAsJSON(c *gin.Context, headlines []shared.RssHeadline
 		response.FilterApplied = filter
 	}
 
+	// Set security headers
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "default-src 'none'")
 	c.JSON(http.StatusOK, response)
 }
 
 func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline, filename string) {
+	// Set security headers
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "default-src 'none'")
 
 	writer := csv.NewWriter(c.Writer)
 
@@ -486,13 +496,13 @@ func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline,
 		return
 	}
 
-	// Write data rows
+	// Write data rows with sanitization
 	for _, headline := range headlines {
 		row := []string{
-			headline.Title,
-			headline.Link,
-			headline.PublishedAt,
-			headline.Source,
+			h.sanitizeCSVField(headline.Title),
+			h.sanitizeCSVField(headline.Link),
+			h.sanitizeCSVField(headline.PublishedAt),
+			h.sanitizeCSVField(headline.Source),
 		}
 		if err := writer.Write(row); err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
@@ -514,15 +524,43 @@ func (h *RSSHandler) exportAsCSV(c *gin.Context, headlines []shared.RssHeadline,
 func (h *RSSHandler) parseExportLimit(c *gin.Context) int {
 	limitStr := c.Query("limit")
 	if limitStr == "" {
-		return 0 // No limit
+		return maxExportItems // Default to max allowed
 	}
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 0 {
-		return 0
+		return maxExportItems
+	}
+
+	// Enforce maximum export limit for security
+	if limit > maxExportItems {
+		return maxExportItems
 	}
 
 	return limit
+}
+
+// sanitizeCSVField protects against CSV injection by sanitizing field values.
+// It prefixes potentially dangerous characters with a single quote to neutralize
+// formula injection attempts.
+func (h *RSSHandler) sanitizeCSVField(field string) string {
+	if field == "" {
+		return field
+	}
+
+	// Check if the field starts with a potentially dangerous character
+	// These characters can trigger formula execution in spreadsheet applications
+	dangerousChars := []rune{'=', '+', '-', '@', '\t', '\r'}
+	firstChar := rune(field[0])
+
+	for _, dangerous := range dangerousChars {
+		if firstChar == dangerous {
+			// Prefix with single quote to neutralize formula injection
+			return "'" + field
+		}
+	}
+
+	return field
 }
 
 // ResetCache resets both caches (for testing purposes).
