@@ -240,8 +240,12 @@ func (ctx *top200TestContext) theStatusBarShouldShow(expectedText string) error 
 }
 
 func (ctx *top200TestContext) newsItemsAreLoadedInTheTerminalUI(count int) error {
-	ctx.theAPIReturnsNewsItems(count)
-	ctx.iLoadTheTerminalUI()
+	if err := ctx.theAPIReturnsNewsItems(count); err != nil {
+		return err
+	}
+	if err := ctx.iLoadTheTerminalUI(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -402,12 +406,13 @@ func (ctx *top200TestContext) iClickTheButton(buttonText string) error {
 	ctx.router.ServeHTTP(respLoad, reqLoad)
 
 	// Now export the data
-	if buttonText == "Export JSON" {
+	switch buttonText {
+	case "Export JSON":
 		req := httptest.NewRequest(http.MethodGet, "/api/rss/spiegel/export?format=json&limit=200", nil)
 		ctx.response = httptest.NewRecorder()
 		ctx.router.ServeHTTP(ctx.response, req)
 		ctx.exportedFile = ctx.response.Body.Bytes()
-	} else if buttonText == "Export CSV" {
+	case "Export CSV":
 		req := httptest.NewRequest(http.MethodGet, "/api/rss/spiegel/export?format=csv&limit=200", nil)
 		ctx.response = httptest.NewRecorder()
 		ctx.router.ServeHTTP(ctx.response, req)
