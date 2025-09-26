@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/google/uuid"
 )
 
 // RSSExportUIContext holds state for RSS export UI scenarios
@@ -87,8 +87,8 @@ func (ctx *RSSExportUIContext) iClickTheButton(buttonText string) error {
 	}
 	ctx.response = resp
 
-	// Simulate file download
-	ctx.downloadedFile = fmt.Sprintf("rss-export-%d.%s", time.Now().Unix(), format)
+	// Simulate file download using UUID to prevent race conditions
+	ctx.downloadedFile = fmt.Sprintf("rss-export-%s.%s", uuid.New().String(), format)
 
 	return nil
 }
