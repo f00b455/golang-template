@@ -36,12 +36,15 @@ func (ctx *greetFeatureContext) iAmUsingTheSharedGreetFunction() error {
 }
 
 func InitializeScenario(ctx *godog.ScenarioContext) {
+	// Initialize greet scenarios
 	featureCtx := &greetFeatureContext{}
-
 	ctx.Step(`^I am using the shared greet function$`, featureCtx.iAmUsingTheSharedGreetFunction)
 	ctx.Step(`^I have the name "([^"]*)"$`, featureCtx.iHaveTheName)
 	ctx.Step(`^I call the greet function$`, featureCtx.iCallTheGreetFunction)
 	ctx.Step(`^I should receive "([^"]*)"$`, featureCtx.iShouldReceive)
+
+	// Initialize RSS Export UI scenarios
+	InitializeRSSExportUIScenario(ctx)
 }
 
 func TestSharedFeatures(t *testing.T) {

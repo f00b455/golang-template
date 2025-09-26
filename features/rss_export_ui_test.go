@@ -44,11 +44,11 @@ func (ctx *RSSExportUIContext) theRSSAPIExportEndpointsAreAvailable() error {
 		case "json":
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Content-Disposition", `attachment; filename="rss-export.json"`)
-			w.Write([]byte(`[{"title":"Test Article","link":"http://example.com"}]`))
+			_, _ = w.Write([]byte(`[{"title":"Test Article","link":"http://example.com"}]`))
 		case "csv":
 			w.Header().Set("Content-Type", "text/csv")
 			w.Header().Set("Content-Disposition", `attachment; filename="rss-export.csv"`)
-			w.Write([]byte("title,link\nTest Article,http://example.com"))
+			_, _ = w.Write([]byte("title,link\nTest Article,http://example.com"))
 		default:
 			http.Error(w, "Invalid format", http.StatusBadRequest)
 		}
@@ -351,13 +351,8 @@ func InitializeRSSExportUIScenario(ctx *godog.ScenarioContext) {
 		}
 		// Clean up any test files
 		if exportCtx.downloadedFile != "" {
-			os.Remove(filepath.Join(os.TempDir(), exportCtx.downloadedFile))
+			_ = os.Remove(filepath.Join(os.TempDir(), exportCtx.downloadedFile))
 		}
 		return ctx, nil
 	})
-}
-
-// InitializeScenario is called by the test runner
-func InitializeScenario(ctx *godog.ScenarioContext) {
-	InitializeRSSExportUIScenario(ctx)
 }

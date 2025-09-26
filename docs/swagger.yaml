@@ -67,6 +67,44 @@ paths:
       summary: Greet endpoint
       tags:
       - greet
+  /rss/spiegel/export:
+    get:
+      consumes:
+      - application/json
+      description: Exports RSS headlines in CSV or JSON format
+      parameters:
+      - description: Export format (json or csv)
+        in: query
+        name: format
+        required: true
+        type: string
+      - description: Filter headlines by keyword
+        in: query
+        name: filter
+        type: string
+      - description: Number of headlines to export
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      - text/csv
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Export SPIEGEL RSS headlines
+      tags:
+      - rss
   /rss/spiegel/latest:
     get:
       consumes:
