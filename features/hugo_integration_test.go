@@ -689,6 +689,17 @@ func InitializeHugoScenario(ctx *godog.ScenarioContext) {
 }
 
 func TestHugoIntegrationFeatures(t *testing.T) {
+	// Check if Hugo binary is available - skip test if not
+	hugoPath := "bin/hugo"
+	if _, err := os.Stat(hugoPath); err != nil {
+		// Also check if install script exists
+		installScript := "scripts/install-hugo.sh"
+		if _, err := os.Stat(installScript); err != nil {
+			t.Skip("Skipping Hugo integration tests: Hugo binary not found and install script not available")
+			return
+		}
+	}
+
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeHugoScenario,
 		Options: &godog.Options{
