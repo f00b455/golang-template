@@ -175,12 +175,17 @@ jobs:
 
             "Claude Iterative Fix")
               if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
-                echo "Fix applied, re-running tests"
+                echo "✅ Decision: Fix workflow completed → re-running tests"
                 echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+                # Remove the fixing label since the fix workflow has completed
+                gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
                 gh pr edit $PR_NUMBER --add-label "pipeline:testing"
 
                 # Mark that we've attempted a fix, so we know to review after tests pass
                 gh pr edit $PR_NUMBER --add-label "pipeline:fix-attempted"
+              else
+                echo "❌ Fix workflow failed, removing fixing label"
+                gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
               fi
               ;;
 
