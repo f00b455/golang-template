@@ -36,19 +36,17 @@ jobs:
         run: |
           PR_NUMBER="${{ inputs.pr_number }}"
 
+          echo "🔍 Checking PR #$PR_NUMBER for failing checks..."
+
           # Get the commit SHA for the PR
           COMMIT_SHA=$(gh pr view $PR_NUMBER --json headRefOid --jq '.headRefOid')
 
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_OUTPUT
 
-          # Check if fixing is already in progress
-          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" || echo "")
-          if echo "$LABELS" | grep -q "pipeline:fixing"; then
-            echo "Fix workflow already in progress, skipping"
-            echo "SHOULD_FIX=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          # Log current labels for debugging
+          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" || echo "none")
+          echo "📌 Current pipeline labels: $LABELS"
 
           # Get status checks for the commit
           FAILING_CHECKS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.statuses[] | select(.state == "failure" or .state == "error") | .context' | tr '\n' ' ')
@@ -57,14 +55,15 @@ jobs:
           # Also check check runs
           FAILING_CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .name' | tr '\n' ' ')
 
-          echo "Failing status checks: $FAILING_CHECKS"
-          echo "Pending status checks: $PENDING_CHECKS"
-          echo "Failing check runs: $FAILING_CHECK_RUNS"
+          echo "📊 Check Status Report:"
+          echo "  ❌ Failing status checks: ${FAILING_CHECKS:-none}"
+          echo "  ⏳ Pending status checks: ${PENDING_CHECKS:-none}"
+          echo "  ❌ Failing check runs: ${FAILING_CHECK_RUNS:-none}"
 
           # Skip if there are pending checks (wait for them to complete)
           if [[ -n "$PENDING_CHECKS" ]]; then
             echo "SHOULD_FIX=false" >> $GITHUB_OUTPUT
-            echo "Pending checks detected, will wait for completion"
+            echo "⏸️ Skipping: Pending checks detected, will wait for completion"
             exit 0
           fi
 
@@ -72,10 +71,14 @@ jobs:
           ALL_FAILING="$FAILING_CHECKS $FAILING_CHECK_RUNS"
           NEEDS_FIX=false
 
+          echo "🔎 Analyzing failing checks..."
           # Check for any failing checks including Test (which includes coverage)
           if [[ "$ALL_FAILING" == *"Lint"* ]] || [[ "$ALL_FAILING" == *"Test"* ]] || [[ "$ALL_FAILING" == *"Build"* ]]; then
             NEEDS_FIX=true
-            echo "Detected failing checks that need fixing: $ALL_FAILING"
+            echo "✅ Action Required: Detected failing checks that need fixing"
+            echo "   Failed checks: $ALL_FAILING"
+          else
+            echo "ℹ️ No action needed: No critical checks are failing"
           fi
 
           echo "SHOULD_FIX=$NEEDS_FIX" >> $GITHUB_OUTPUT

@@ -71,20 +71,22 @@ jobs:
         id: state
         run: |
           PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
+          echo "📋 Checking pipeline state for PR #$PR_NUMBER"
 
           # Get current labels
           LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" || echo "")
+          echo "🏷️ Current pipeline labels: ${LABELS:-none}"
 
           # Check for stop signal
           if echo "$LABELS" | grep -q "pipeline:stop"; then
-            echo "Pipeline stopped by user"
+            echo "🛑 Pipeline stopped by user"
             echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Check if another action is already in progress (fixing, reviewing, improving)
           if echo "$LABELS" | grep -qE "pipeline:(fixing|reviewing|improving)"; then
-            echo "Another pipeline action is already in progress"
+            echo "⏳ Another pipeline action is already in progress"
             echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -96,7 +98,7 @@ jobs:
           fi
 
           echo "CURRENT_ITERATION=$ITERATION" >> $GITHUB_OUTPUT
-          echo "Current iteration: $ITERATION"
+          echo "🔄 Current iteration: $ITERATION / ${{ env.MAX_ITERATIONS }}"
 
           # Check max iterations
           if [[ $ITERATION -ge ${{ env.MAX_ITERATIONS }} ]]; then
@@ -132,7 +134,10 @@ jobs:
           WORKFLOW_NAME="${{ github.event.workflow_run.name || github.event.workflow_run.workflow_name || 'Initial' }}"
           WORKFLOW_CONCLUSION="${{ github.event.workflow_run.conclusion || 'none' }}"
 
-          echo "Triggered by: $WORKFLOW_NAME with conclusion: $WORKFLOW_CONCLUSION"
+          echo "🎯 Workflow Detection:"
+          echo "   Triggered by: $WORKFLOW_NAME"
+          echo "   Conclusion: $WORKFLOW_CONCLUSION"
+          echo "   Event: ${{ github.event_name }}"
 
           # Remove all pipeline state labels
           gh pr edit $PR_NUMBER --remove-label "pipeline:testing" 2>/dev/null || true
@@ -152,14 +157,17 @@ jobs:
               LINT_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Lint") | .conclusion')
               TEST_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Test") | .conclusion')
 
-              echo "Lint status: $LINT_STATUS, Test status: $TEST_STATUS"
+              echo "📊 Go CI/CD Results:"
+              echo "   Lint status: ${LINT_STATUS:-unknown}"
+              echo "   Test status: ${TEST_STATUS:-unknown}"
 
               if [[ "$LINT_STATUS" == "success" && "$TEST_STATUS" == "success" ]]; then
-                echo "Both lint and test passed, triggering code review"
+                echo "✅ Decision: Both lint and test passed → triggering code review"
                 echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
                 gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
               else
-                echo "Lint or test failed (Lint: $LINT_STATUS, Test: $TEST_STATUS), triggering iterative fix"
+                echo "🔧 Decision: Checks failed → triggering iterative fix"
+                echo "   Reason: Lint=${LINT_STATUS:-failed}, Test=${TEST_STATUS:-failed}"
                 echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
                 gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
               fi
