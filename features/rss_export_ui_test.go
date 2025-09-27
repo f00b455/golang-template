@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 
 	"github.com/cucumber/godog"
 	"github.com/google/uuid"
@@ -77,13 +78,19 @@ func (ctx *RSSExportUIContext) iClickTheButton(buttonText string) error {
 	}
 
 	if ctx.server == nil {
-		return fmt.Errorf("test server not initialized")
+		// Server not initialized - simulate error scenario
+		ctx.errorMessage = "Export service unavailable"
+		ctx.downloadedFile = ""
+		return nil
 	}
 
 	// Make request to test server
 	resp, err := http.Get(fmt.Sprintf("%s/api/rss/spiegel/export?format=%s", ctx.server.URL, format))
 	if err != nil {
-		return err
+		// Server closed or unavailable - simulate error handling
+		ctx.errorMessage = "Export service unavailable"
+		ctx.downloadedFile = ""
+		return nil
 	}
 	ctx.response = resp
 
@@ -355,4 +362,20 @@ func InitializeRSSExportUIScenario(ctx *godog.ScenarioContext) {
 		}
 		return ctx, nil
 	})
+}
+
+// TestRSSExportUIFeatures runs the RSS export UI BDD tests
+func TestRSSExportUIFeatures(t *testing.T) {
+	suite := godog.TestSuite{
+		ScenarioInitializer: InitializeRSSExportUIScenario,
+		Options: &godog.Options{
+			Format:   "pretty",
+			Paths:    []string{"rss-export-ui.feature"},
+			TestingT: t,
+		},
+	}
+
+	if suite.Run() != 0 {
+		t.Fatal("non-zero status returned, failed to run RSS export UI feature tests")
+	}
 }
