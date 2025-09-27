@@ -174,7 +174,7 @@ jobs:
               gh pr edit $PR_NUMBER --add-label "pipeline:iteration-1"
             fi
 
-          elif [[ "$LINT_STATUS" == "SUCCESS" && "$TEST_STATUS" == "SUCCESS" ]]; then
+          elif [[ "${LINT_STATUS,,}" == "success" && "${TEST_STATUS,,}" == "success" ]]; then
             # All checks passed
             if [[ "$HAS_FIX_ATTEMPTED" == "true" ]]; then
               echo "✅ Decision: Tests passed after fix → triggering code review"
@@ -187,7 +187,7 @@ jobs:
               gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
             fi
 
-          elif [[ "$LINT_STATUS" == "FAILURE" || "$TEST_STATUS" == "FAILURE" ]]; then
+          elif [[ "${LINT_STATUS,,}" == "failure" || "${TEST_STATUS,,}" == "failure" ]]; then
             # Tests failed - need to fix
             if [[ $CURRENT_ITERATION -lt ${{ env.MAX_ITERATIONS }} ]]; then
               echo "🔧 Decision: Tests failed → triggering iterative fix"
@@ -200,7 +200,7 @@ jobs:
               gh pr edit $PR_NUMBER --add-label "pipeline:max-iterations-reached"
             fi
 
-          elif [[ "$LINT_STATUS" == "IN_PROGRESS" || "$TEST_STATUS" == "IN_PROGRESS" || "$LINT_STATUS" == "PENDING" || "$TEST_STATUS" == "PENDING" ]]; then
+          elif [[ "${LINT_STATUS,,}" == "in_progress" || "${TEST_STATUS,,}" == "in_progress" || "${LINT_STATUS,,}" == "pending" || "${TEST_STATUS,,}" == "pending" ]]; then
             # Tests are running
             echo "⏳ Decision: Tests in progress → waiting"
             echo "NEXT_ACTION=wait" >> $GITHUB_OUTPUT
