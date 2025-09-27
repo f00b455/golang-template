@@ -157,26 +157,45 @@ jobs:
               LINT_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Lint") | .conclusion')
               TEST_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Test") | .conclusion')
 
+              # Check if we've attempted a fix
+              HAS_FIX_ATTEMPTED=$(echo "$LABELS" | grep -q "pipeline:fix-attempted" && echo "true" || echo "false")
+
               echo "📊 Go CI/CD Results:"
               echo "   Lint status: ${LINT_STATUS:-unknown}"
               echo "   Test status: ${TEST_STATUS:-unknown}"
+              echo "   Fix attempted: $HAS_FIX_ATTEMPTED"
 
               if [[ "$LINT_STATUS" == "success" && "$TEST_STATUS" == "success" ]]; then
-                echo "✅ Decision: Both lint and test passed → triggering code review"
-                echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
-                gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
+                # Tests passed! Check if we should trigger review
+                if [[ "$HAS_FIX_ATTEMPTED" == "true" ]]; then
+                  echo "✅ Decision: Tests passed after fix → triggering code review"
+                  echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
+                  gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
+                  gh pr edit $PR_NUMBER --remove-label "pipeline:fix-attempted" 2>/dev/null || true
+                else
+                  echo "✅ Decision: Tests passed (no fixes needed) → triggering code review"
+                  echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
+                  gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
+                fi
               else
-                echo "🔧 Decision: Checks failed → triggering iterative fix"
-                echo "   Reason: Lint=${LINT_STATUS:-failed}, Test=${TEST_STATUS:-failed}"
-                echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
-                gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
+                # Tests failed - check iteration count before triggering fix
+                CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
+                if [[ $CURRENT_ITERATION -lt ${{ env.MAX_ITERATIONS }} ]]; then
+                  echo "🔧 Decision: Checks failed → triggering iterative fix"
+                  echo "   Reason: Lint=${LINT_STATUS:-failed}, Test=${TEST_STATUS:-failed}"
+                  echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
+                  gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
+                else
+                  echo "🛑 Max iterations reached, not triggering more fixes"
+                  echo "NEXT_ACTION=none" >> $GITHUB_OUTPUT
+                fi
               fi
               ;;
 
             "Claude Iterative Fix")
               if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
-                echo "✅ Decision: Fix workflow completed → re-running tests"
-                echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+                echo "✅ Decision: Fix workflow completed → waiting for tests to complete"
+                echo "NEXT_ACTION=wait_for_tests" >> $GITHUB_OUTPUT
                 # Remove the fixing label since the fix workflow has completed
                 gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
                 gh pr edit $PR_NUMBER --add-label "pipeline:testing"
@@ -260,6 +279,12 @@ jobs:
               if [[ "$CURRENT_ITERATION" -eq "1" ]] || [[ "${{ github.event.workflow_run.name }}" == "Claude Iterative Fix" ]] || [[ "${{ github.event.workflow_run.name }}" == "Claude Code Improvements" ]]; then
                 gh pr comment $PR_NUMBER --body "🔄 **Pipeline Status**: Running tests (iteration $CURRENT_ITERATION)"
               fi
+              ;;
+
+            "wait_for_tests")
+              echo "⏳ Tests are running automatically after the push from Claude Iterative Fix"
+              gh pr comment $PR_NUMBER --body "⏳ **Pipeline Status**: Waiting for tests to complete after iteration fixes"
+              # Tests will trigger automatically, and Pipeline Orchestrator will run again when Go CI/CD completes
               ;;
 
             "fix")
