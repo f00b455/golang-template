@@ -131,136 +131,108 @@ jobs:
         if: steps.state.outputs.SHOULD_CONTINUE == 'true'
         run: |
           PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
-          WORKFLOW_NAME="${{ github.event.workflow_run.name || github.event.workflow_run.workflow_name || 'Initial' }}"
-          WORKFLOW_CONCLUSION="${{ github.event.workflow_run.conclusion || 'none' }}"
+          CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
 
-          echo "🎯 Workflow Detection:"
-          echo "   Triggered by: $WORKFLOW_NAME"
-          echo "   Conclusion: $WORKFLOW_CONCLUSION"
-          echo "   Event: ${{ github.event_name }}"
+          echo "🎯 Checking PR #$PR_NUMBER current state..."
 
-          # Remove all pipeline state labels
+          # Get current labels
+          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' | grep "^pipeline:" || echo "")
+
+          # Get current commit SHA and check statuses
+          COMMIT_SHA=$(gh pr view $PR_NUMBER --json headRefOid --jq '.headRefOid')
+
+          # Get specific job conclusions
+          LINT_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Lint") | .conclusion' 2>/dev/null || echo "")
+          TEST_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Test") | .conclusion' 2>/dev/null || echo "")
+
+          # Check if we've attempted a fix before
+          HAS_FIX_ATTEMPTED=$(echo "$LABELS" | grep -q "pipeline:fix-attempted" && echo "true" || echo "false")
+
+          echo "📊 Current Status:"
+          echo "   Lint: ${LINT_STATUS:-not run}"
+          echo "   Test: ${TEST_STATUS:-not run}"
+          echo "   Iteration: $CURRENT_ITERATION / ${{ env.MAX_ITERATIONS }}"
+          echo "   Fix attempted: $HAS_FIX_ATTEMPTED"
+          echo "   Labels: ${LABELS:-none}"
+
+          # Clear previous state labels (but keep iteration and fix-attempted)
           gh pr edit $PR_NUMBER --remove-label "pipeline:testing" 2>/dev/null || true
           gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
           gh pr edit $PR_NUMBER --remove-label "pipeline:reviewing" 2>/dev/null || true
           gh pr edit $PR_NUMBER --remove-label "pipeline:improving" 2>/dev/null || true
           gh pr edit $PR_NUMBER --remove-label "pipeline:complete" 2>/dev/null || true
-          gh pr edit $PR_NUMBER --remove-label "pipeline:fix-attempted" 2>/dev/null || true
 
-          # Determine next action based on workflow that just completed
-          case "$WORKFLOW_NAME" in
-            "Go CI/CD")
-              # Check individual job statuses rather than overall workflow conclusion
-              COMMIT_SHA=$(gh pr view $PR_NUMBER --json headRefOid --jq '.headRefOid')
+          # Decision logic based on actual state
+          if [[ -z "$LINT_STATUS" && -z "$TEST_STATUS" ]]; then
+            # No tests have run yet
+            echo "📝 Decision: No tests found → waiting for initial test run"
+            echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+            gh pr edit $PR_NUMBER --add-label "pipeline:testing"
 
-              # Get specific job conclusions
-              LINT_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Lint") | .conclusion')
-              TEST_STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name == "Test") | .conclusion')
-
-              # Check if we've attempted a fix
-              HAS_FIX_ATTEMPTED=$(echo "$LABELS" | grep -q "pipeline:fix-attempted" && echo "true" || echo "false")
-
-              echo "📊 Go CI/CD Results:"
-              echo "   Lint status: ${LINT_STATUS:-unknown}"
-              echo "   Test status: ${TEST_STATUS:-unknown}"
-              echo "   Fix attempted: $HAS_FIX_ATTEMPTED"
-
-              if [[ "$LINT_STATUS" == "success" && "$TEST_STATUS" == "success" ]]; then
-                # Tests passed! Check if we should trigger review
-                if [[ "$HAS_FIX_ATTEMPTED" == "true" ]]; then
-                  echo "✅ Decision: Tests passed after fix → triggering code review"
-                  echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
-                  gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
-                  gh pr edit $PR_NUMBER --remove-label "pipeline:fix-attempted" 2>/dev/null || true
-                else
-                  echo "✅ Decision: Tests passed (no fixes needed) → triggering code review"
-                  echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
-                  gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
-                fi
-              else
-                # Tests failed - check iteration count before triggering fix
-                CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
-                if [[ $CURRENT_ITERATION -lt ${{ env.MAX_ITERATIONS }} ]]; then
-                  echo "🔧 Decision: Checks failed → triggering iterative fix"
-                  echo "   Reason: Lint=${LINT_STATUS:-failed}, Test=${TEST_STATUS:-failed}"
-                  echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
-                  gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
-                else
-                  echo "🛑 Max iterations reached, not triggering more fixes"
-                  echo "NEXT_ACTION=none" >> $GITHUB_OUTPUT
-                fi
-              fi
-              ;;
-
-            "Claude Iterative Fix")
-              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
-                echo "✅ Decision: Fix workflow completed → waiting for tests to complete"
-                echo "NEXT_ACTION=wait_for_tests" >> $GITHUB_OUTPUT
-                # Remove the fixing label since the fix workflow has completed
-                gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
-                gh pr edit $PR_NUMBER --add-label "pipeline:testing"
-
-                # Mark that we've attempted a fix, so we know to review after tests pass
-                gh pr edit $PR_NUMBER --add-label "pipeline:fix-attempted"
-              else
-                echo "❌ Fix workflow failed, removing fixing label"
-                gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
-              fi
-              ;;
-
-            "Claude Code Review")
-              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
-                # Check if review had suggestions (look for recent review comments)
-                RECENT_REVIEW=$(gh pr view $PR_NUMBER --json comments --jq '.comments[-1].body' 2>/dev/null || echo "")
-
-                if echo "$RECENT_REVIEW" | grep -q "Issues\|Recommendations\|Fix\|Should"; then
-                  echo "Review has suggestions, triggering improvements"
-                  echo "NEXT_ACTION=improve" >> $GITHUB_OUTPUT
-                  gh pr edit $PR_NUMBER --add-label "pipeline:improving"
-                else
-                  echo "Review complete with no major issues"
-                  echo "NEXT_ACTION=complete" >> $GITHUB_OUTPUT
-                  gh pr edit $PR_NUMBER --add-label "pipeline:complete"
-                fi
-              fi
-              ;;
-
-            "Claude Code Improvements")
-              if [[ "$WORKFLOW_CONCLUSION" == "success" ]]; then
-                echo "Improvements applied, re-running tests"
-                echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
-                gh pr edit $PR_NUMBER --add-label "pipeline:testing"
-
-                # Increment iteration counter
-                CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
-                NEXT_ITERATION=$((CURRENT_ITERATION + 1))
-
-                # Remove old iteration label
-                gh pr edit $PR_NUMBER --remove-label "pipeline:iteration-$CURRENT_ITERATION" 2>/dev/null || true
-
-                # Add new iteration label
-                gh pr edit $PR_NUMBER --add-label "pipeline:iteration-$NEXT_ITERATION"
-              fi
-              ;;
-
-            "Initial"|"")
-              # Initial trigger or manual dispatch
-              echo "Starting pipeline with tests"
-              echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
-              gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+            # Add iteration label if missing
+            if ! echo "$LABELS" | grep -q "pipeline:iteration-"; then
               gh pr edit $PR_NUMBER --add-label "pipeline:iteration-1"
-              ;;
+            fi
 
-            *)
-              echo "Unknown workflow: $WORKFLOW_NAME"
+          elif [[ "$LINT_STATUS" == "SUCCESS" && "$TEST_STATUS" == "SUCCESS" ]]; then
+            # All checks passed
+            if [[ "$HAS_FIX_ATTEMPTED" == "true" ]]; then
+              echo "✅ Decision: Tests passed after fix → triggering code review"
+              echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
+              gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
+              gh pr edit $PR_NUMBER --remove-label "pipeline:fix-attempted" 2>/dev/null || true
+            else
+              echo "✅ Decision: Tests passed → triggering code review"
+              echo "NEXT_ACTION=review" >> $GITHUB_OUTPUT
+              gh pr edit $PR_NUMBER --add-label "pipeline:reviewing"
+            fi
+
+          elif [[ "$LINT_STATUS" == "FAILURE" || "$TEST_STATUS" == "FAILURE" ]]; then
+            # Tests failed - need to fix
+            if [[ $CURRENT_ITERATION -lt ${{ env.MAX_ITERATIONS }} ]]; then
+              echo "🔧 Decision: Tests failed → triggering iterative fix"
+              echo "   Lint: ${LINT_STATUS:-unknown}, Test: ${TEST_STATUS:-unknown}"
+              echo "NEXT_ACTION=fix" >> $GITHUB_OUTPUT
+              gh pr edit $PR_NUMBER --add-label "pipeline:fixing"
+            else
+              echo "🛑 Max iterations reached (${{ env.MAX_ITERATIONS }})"
               echo "NEXT_ACTION=none" >> $GITHUB_OUTPUT
-              ;;
-          esac
+              gh pr edit $PR_NUMBER --add-label "pipeline:max-iterations-reached"
+            fi
+
+          elif [[ "$LINT_STATUS" == "IN_PROGRESS" || "$TEST_STATUS" == "IN_PROGRESS" || "$LINT_STATUS" == "PENDING" || "$TEST_STATUS" == "PENDING" ]]; then
+            # Tests are running
+            echo "⏳ Decision: Tests in progress → waiting"
+            echo "NEXT_ACTION=wait" >> $GITHUB_OUTPUT
+            gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+
+          else
+            # Unknown state
+            echo "❓ Unknown state - waiting for tests"
+            echo "NEXT_ACTION=test" >> $GITHUB_OUTPUT
+            gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+          fi
+
+          # Special handling for completed workflows
+          WORKFLOW_NAME="${{ github.event.workflow_run.name || '' }}"
+          if [[ "$WORKFLOW_NAME" == "Claude Iterative Fix" && "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
+            echo "📌 Claude fix completed - marking fix attempted"
+            gh pr edit $PR_NUMBER --add-label "pipeline:fix-attempted"
+            gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
+            gh pr edit $PR_NUMBER --add-label "pipeline:testing"
+            echo "NEXT_ACTION=wait_for_tests" >> $GITHUB_OUTPUT
+
+          elif [[ "$WORKFLOW_NAME" == "Claude Code Improvements" && "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
+            echo "📌 Improvements completed - incrementing iteration"
+            NEXT_ITERATION=$((CURRENT_ITERATION + 1))
+            gh pr edit $PR_NUMBER --remove-label "pipeline:iteration-$CURRENT_ITERATION" 2>/dev/null || true
+            gh pr edit $PR_NUMBER --add-label "pipeline:iteration-$NEXT_ITERATION"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add Cooldown
-        if: steps.next-action.outputs.NEXT_ACTION != 'none' && steps.next-action.outputs.NEXT_ACTION != 'complete'
+        if: steps.next-action.outputs.NEXT_ACTION != 'none' && steps.next-action.outputs.NEXT_ACTION != 'complete' && steps.next-action.outputs.NEXT_ACTION != 'wait' && steps.next-action.outputs.NEXT_ACTION != 'wait_for_tests'
         run: |
           echo "Adding ${{ env.COOLDOWN_SECONDS }} second cooldown before next action..."
           sleep ${{ env.COOLDOWN_SECONDS }}
@@ -274,23 +246,19 @@ jobs:
           case "$NEXT_ACTION" in
             "test")
               echo "Tests will run automatically on the next push"
-              # Only add a comment if this is the first test run in an iteration
               CURRENT_ITERATION="${{ steps.state.outputs.CURRENT_ITERATION }}"
-              if [[ "$CURRENT_ITERATION" -eq "1" ]] || [[ "${{ github.event.workflow_run.name }}" == "Claude Iterative Fix" ]] || [[ "${{ github.event.workflow_run.name }}" == "Claude Code Improvements" ]]; then
-                gh pr comment $PR_NUMBER --body "🔄 **Pipeline Status**: Running tests (iteration $CURRENT_ITERATION)"
-              fi
+              gh pr comment $PR_NUMBER --body "🔄 **Pipeline Status**: Running tests (iteration ${CURRENT_ITERATION:-1})"
               ;;
 
-            "wait_for_tests")
-              echo "⏳ Tests are running automatically after the push from Claude Iterative Fix"
-              gh pr comment $PR_NUMBER --body "⏳ **Pipeline Status**: Waiting for tests to complete after iteration fixes"
-              # Tests will trigger automatically, and Pipeline Orchestrator will run again when Go CI/CD completes
+            "wait"|"wait_for_tests")
+              echo "⏳ Waiting for tests to complete"
+              # Pipeline Orchestrator will run again when tests complete
               ;;
 
             "fix")
               echo "Triggering iterative fix workflow..."
               gh workflow run claude-iterative-fix.yml --field pr_number="$PR_NUMBER"
-              gh pr comment $PR_NUMBER --body "🔧 **Pipeline Status**: Applying automated fixes"
+              gh pr comment $PR_NUMBER --body "🔧 **Pipeline Status**: Applying automated fixes (iteration ${{ steps.state.outputs.CURRENT_ITERATION }})"
               ;;
 
             "review")
@@ -300,7 +268,8 @@ jobs:
               ;;
 
             "improve")
-              echo "Improvements will trigger after review completes"
+              echo "Triggering improvements workflow..."
+              gh workflow run claude-code-improvements.yml --field pr_number="$PR_NUMBER"
               gh pr comment $PR_NUMBER --body "✨ **Pipeline Status**: Implementing review feedback"
               ;;
 
@@ -311,7 +280,7 @@ jobs:
               ;;
 
             *)
-              echo "No action to trigger"
+              echo "No action to trigger (action: $NEXT_ACTION)"
               ;;
           esac
         env:
