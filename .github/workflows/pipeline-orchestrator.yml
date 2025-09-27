@@ -129,7 +129,7 @@ jobs:
         if: steps.state.outputs.SHOULD_CONTINUE == 'true'
         run: |
           PR_NUMBER="${{ steps.pr-number.outputs.PR_NUMBER }}"
-          WORKFLOW_NAME="${{ github.event.workflow_run.workflow_name || 'Initial' }}"
+          WORKFLOW_NAME="${{ github.event.workflow_run.name || github.event.workflow_run.workflow_name || 'Initial' }}"
           WORKFLOW_CONCLUSION="${{ github.event.workflow_run.conclusion || 'none' }}"
 
           echo "Triggered by: $WORKFLOW_NAME with conclusion: $WORKFLOW_CONCLUSION"
