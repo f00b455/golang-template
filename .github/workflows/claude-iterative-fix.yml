@@ -168,6 +168,22 @@ jobs:
 
           claude_args: '--allowed-tools "Read,Edit,Write,MultiEdit,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(make:*),Bash(go:*),Bash(sed:*)"'
 
+      - name: Update pipeline labels after fix
+        if: steps.check-status.outputs.SHOULD_FIX == 'true'
+        run: |
+          PR_NUMBER="${{ steps.check-status.outputs.PR_NUMBER }}"
+          echo "🏷️ Updating pipeline labels after fix attempt"
+
+          # Remove the fixing label since Claude has completed the fix
+          gh pr edit $PR_NUMBER --remove-label "pipeline:fixing" 2>/dev/null || true
+
+          # Add testing label to indicate tests should re-run
+          gh pr edit $PR_NUMBER --add-label "pipeline:testing" 2>/dev/null || true
+
+          echo "✅ Labels updated: removed pipeline:fixing, added pipeline:testing"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Comment on max iterations reached
         if: steps.check-status.outputs.SHOULD_FIX == 'true' && steps.get-iteration.outputs.MAX_ITERATIONS_REACHED == 'true'
         run: |
